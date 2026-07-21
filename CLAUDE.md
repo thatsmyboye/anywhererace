@@ -9,7 +9,7 @@ simulation play out in real time — or skip to the finishing order.
 There is no human-controlled racer. Every participant is simulated. The user is a
 race director / spectator, not a driver.
 
-**Repo:** `github.com/thatsmyboye/anywhere-race`
+**Repo:** `github.com/thatsmyboye/anywhererace`
 
 ---
 
