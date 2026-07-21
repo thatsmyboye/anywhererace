@@ -234,3 +234,104 @@ describe('sanity ranges: cornering', () => {
     expect(lapTime('city-car') / lapTime('open-wheel-racer')).toBeGreaterThan(1.4);
   });
 });
+
+/**
+ * Finishing is supposed to be the common case.
+ *
+ * This is the regression suite for the "car tactics in a foot race" bug. A
+ * crash used to be an unconditional DNF for every class, and the crash hazard
+ * was a flat per-tick rate rather than one normalized to race duration the way
+ * the mechanical hazard is. A bicycle or foot race is slow, and therefore long,
+ * and therefore thousands of extra ticks — so the field crashed itself out
+ * until a genuinely reproducible race finished with nobody classified. The fix
+ * makes the terminal-crash odds per vehicle (`crashProneness`) and
+ * duration-normalized, and turns a survived crash into a time loss.
+ *
+ * These run with incidents ON (unlike the speed sanity ranges above, which turn
+ * them off), because the whole point is the incident model.
+ */
+describe('sanity ranges: finishing is the common case', () => {
+  type Tally = { finished: number; crashed: number; total: number; zeroFinishSeeds: number };
+
+  // A long race is many hundreds of thousands of ticks, so these are kept to a
+  // few seeds and given room past the default per-test timeout.
+  const LONG_RACE_TIMEOUT_MS = 120_000;
+
+  const tally = (vehicleClassId: string, lengthM: number, seeds: readonly string[]): Tally => {
+    const result: Tally = { finished: 0, crashed: 0, total: 0, zeroFinishSeeds: 0 };
+    for (const seed of seeds) {
+      const track = makeSyntheticTrack({ lengthM });
+      const race = runRace({
+        track,
+        config: makeConfig({
+          vehicleClassId,
+          racers: makeField({ size: 10 }),
+          laps: 1,
+          seed,
+        }),
+      });
+      expect(race.ok).toBe(true);
+      if (!race.ok) throw new Error(race.error.message);
+
+      const finished = race.value.finishers.filter((f) => f.status === 'finished').length;
+      result.finished += finished;
+      result.crashed += race.value.finishers.filter((f) => f.status === 'dnf-crash').length;
+      result.total += race.value.finishers.length;
+      if (finished === 0) result.zeroFinishSeeds += 1;
+    }
+    return result;
+  };
+
+  const seeds = ['f1', 'f2', 'f3'];
+
+  it(
+    'a long point-to-point bicycle race is not decided by attrition',
+    () => {
+      // ~60km — a couple of hours of racing, well into the range where the old
+      // model started emptying the finishing order.
+      const t = tally('road-cyclist', 60_000, seeds);
+      expect(t.zeroFinishSeeds).toBe(0);
+      expect(t.finished / t.total).toBeGreaterThan(0.75);
+    },
+    LONG_RACE_TIMEOUT_MS,
+  );
+
+  it(
+    'a runner almost never crashes out — they get up and keep running',
+    () => {
+      // A long trail race. crashProneness is 0.03: a fall is a time loss, not
+      // the end of the race.
+      const t = tally('runner', 30_000, seeds);
+      expect(t.zeroFinishSeeds).toBe(0);
+      expect(t.crashed / t.total).toBeLessThan(0.02);
+    },
+    LONG_RACE_TIMEOUT_MS,
+  );
+
+  it(
+    'but a racing car still crashes out sometimes',
+    () => {
+      // The fix must not make crashes vanish where they belong. A twisty
+      // circuit and the fastest, most fragile class in the set: a big one is
+      // terminal.
+      let crashed = 0;
+      for (const seed of ['c1', 'c2', 'c3', 'c4']) {
+        const track = makeSyntheticTrack({ lengthM: 2400, mode: 'circuit', curvatureRadius: 45 });
+        const race = runRace({
+          track,
+          config: makeConfig({
+            vehicleClassId: 'open-wheel-racer',
+            racers: makeField({ size: 12 }),
+            laps: 25,
+            seed,
+          }),
+        });
+        expect(race.ok).toBe(true);
+        if (!race.ok) throw new Error(race.error.message);
+        crashed += race.value.finishers.filter((f) => f.status === 'dnf-crash').length;
+      }
+      expect(crashed).toBeGreaterThan(0);
+    },
+    LONG_RACE_TIMEOUT_MS,
+  );
+});

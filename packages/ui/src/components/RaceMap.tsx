@@ -283,7 +283,10 @@ const buildRacerFeatures = (
         : before.lateralOffset + (racer.lateralOffset - before.lateralOffset) * t;
 
     const point = positionOnTrack(track, distance, lateral);
-    const retired = racer.status === 'dnf-crash' || racer.status === 'dnf-mechanical';
+    const retired =
+      racer.status === 'dnf-crash' ||
+      racer.status === 'dnf-mechanical' ||
+      racer.status === 'dnf-timeout';
 
     features.push({
       type: 'Feature',

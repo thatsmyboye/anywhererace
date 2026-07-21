@@ -123,7 +123,10 @@ export const TimingTower = ({
 
 const TowerRow = ({ row }: { row: Row }) => {
   const { racer, state } = row;
-  const retired = state.status === 'dnf-crash' || state.status === 'dnf-mechanical';
+  const retired =
+    state.status === 'dnf-crash' ||
+    state.status === 'dnf-mechanical' ||
+    state.status === 'dnf-timeout';
 
   return (
     <li
@@ -142,7 +145,7 @@ const TowerRow = ({ row }: { row: Row }) => {
       <span className="shrink-0 text-right text-xs tabular-nums">
         {retired ? (
           <span className="text-[#ff5c5c]">
-            {state.status === 'dnf-crash' ? 'CRASH' : 'MECH'}
+            {state.status === 'dnf-crash' ? 'CRASH' : state.status === 'dnf-timeout' ? 'TIME' : 'MECH'}
           </span>
         ) : row.lapsDown > 0 ? (
           <span className="text-[#8d9bb0]">

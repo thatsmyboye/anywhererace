@@ -48,11 +48,11 @@ The surface-penalty tables (8 surfaces × 8 tire archetypes) are pure judgment.
 
 ---
 
-## 3. Three fields added to `VehicleClass`
+## 3. Four fields added to `VehicleClass`
 
 **Where:** `packages/sim/src/data/vehicles.ts`
 
-CLAUDE.md sketches the struct; I added three fields because the tick could not
+CLAUDE.md sketches the struct; I added four fields because the tick could not
 be written without them. Each is documented in place, but they are deviations:
 
 - **`descentBenefit`** — `gradientSensitivity` cannot do double duty. A runner
@@ -65,10 +65,16 @@ be written without them. Each is documented in place, but they are deviations:
 - **`widthMeters`** — pass resolution has to compare vehicle width against
   `TrackNode.widthMeters`. This is the mechanism that makes single-track
   passing hard.
+- **`crashProneness`** — how often a crash-severity moment ends the race rather
+  than becoming a recoverable time loss. This is what tells a foot race apart
+  from a car race: a runner who goes down gets up, an open-wheel car does not.
+  Without it every class shared one crash-to-DNF rate, which wiped the field in
+  long bicycle and foot races (see §24). The per-class values are judgment, and
+  the most likely of the four to want retuning once races are watched.
 
-If you would rather keep the struct as written, `draftBenefit` and
-`descentBenefit` could both be moved into category-keyed tables in `tuning.ts`.
-`widthMeters` genuinely needs to be per-class.
+If you would rather keep the struct as written, `draftBenefit`,
+`descentBenefit` and `crashProneness` could all be moved into category-keyed
+tables in `tuning.ts`. `widthMeters` genuinely needs to be per-class.
 
 ---
 
@@ -498,3 +504,46 @@ which also means they are tested against real races rather than fixtures.
 - Supabase, and any sync beyond this browser
 - The debug panel that toggles tick steps 2-5. The toggles exist and are wired
   through the worker; nothing exposes them in the UI yet.
+
+---
+
+## 24. Crash model: fixed, but the numbers are judgment
+
+**Where:** `packages/sim/src/data/vehicles.ts` (`crashProneness`),
+`packages/sim/src/tuning.ts` (`incidents`), `packages/sim/src/race.ts`
+(`crashDnfChance`)
+
+A crash used to be an unconditional DNF for every class, and the crash hazard
+was a flat per-tick rate — unlike the mechanical hazard, which is normalized to
+the race's expected duration so `reliability` means "per nominal race". Because
+bikes and runners are slow, they spend the most ticks on course, so a long
+enough bicycle or foot race crashed its whole field out. A wet 185km bike race
+finished with nobody classified.
+
+Two changes, both bumped `SIM_VERSION` to 0.4.0 and regenerated two of the
+three goldens (the gt-racer circuit is short enough that no crash-severity
+moment fires, so its hash is unchanged — the cheap proof car behavior was left
+alone):
+
+1. Whether a crash-severity moment is *terminal* is now a separate roll against
+   the vehicle's `crashProneness`, normalized to race duration the same way the
+   mechanical hazard is. A survived crash becomes a heavy time loss (a fall and
+   remount, a run-off) rather than a retirement.
+2. A field still on the road when the flag falls is classified `dnf-timeout`,
+   not `dnf-mechanical`. Nothing broke; they ran out of race. This is what a
+   genuinely over-long course (a wet bicycle ultra past the 6-hour cap) now
+   shows, instead of pretending every machine failed at once.
+
+What is still judgment:
+
+- **The eleven `crashProneness` values** (0.03 for a runner up to 0.95 for an
+  open-wheel car). Chosen by feel, validated only against the finish-rate
+  sanity suite, not against real attrition data.
+- **`crashRecoveryCostS`** (12-30s) and **`crashNominalDurationS`** (3600s, the
+  duration crash-out odds are quoted against, mirroring
+  `reliability.nominalRaceDurationS`).
+- **Zero-finish is still possible** on a genuinely impossible course — one that
+  cannot be completed inside the 6-hour hard cap. That is now honestly a field
+  of `dnf-timeout`, not a phantom pile-up, but whether the cap itself should
+  scale with course length rather than being a flat six hours is an open
+  question. See `sanity-ranges.test.ts`, "finishing is the common case".

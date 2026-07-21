@@ -65,7 +65,15 @@ export type RacerStatus =
   | 'racing'
   | 'finished'
   | 'dnf-crash'
-  | 'dnf-mechanical';
+  | 'dnf-mechanical'
+  /**
+   * Still on the road when the flag fell — the leader finished long ago, or the
+   * race hit its absolute time cap. Distinct from a mechanical because nothing
+   * broke: they simply ran out of race. This is what a genuinely over-long
+   * course (a wet bicycle ultra that cannot be done inside the cap) classifies
+   * as, rather than pretending every straggler's machine failed at once.
+   */
+  | 'dnf-timeout';
 
 /** Compact per-tick state. This is what the worker posts to the main thread. */
 export type RacerSnapshot = {

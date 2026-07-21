@@ -330,12 +330,36 @@ export const TUNING = {
     /** Skill reduces the hazard by up to this fraction at skill=1. */
     skillMitigation: 0.5,
 
-    /** Outcome split once a mistake happens. Must sum to 1. */
+    /**
+     * Outcome split once a mistake happens. Must sum to 1.
+     *
+     * `crash` is the fraction that are *crash-severity* — the big moment. It is
+     * no longer the fraction that end the race: whether a crash-severity moment
+     * is terminal is decided separately, per vehicle (`crashProneness`) and
+     * normalized to race duration (`race.ts`), because a foot or bicycle
+     * incident is usually survivable and a car one usually is not. A
+     * crash-severity moment that is survived becomes a heavy time loss instead.
+     */
     outcomeWeights: { lockup: 0.72, spin: 0.24, crash: 0.04 },
+
+    /**
+     * The nominal race duration the crash-out odds are quoted against, mirroring
+     * `reliability.nominalRaceDurationS`. A crash-severity moment fires at a
+     * per-tick rate, so without normalizing to this a multi-hour race would
+     * accumulate far more terminal crashes than an hour-long one — which is
+     * exactly what emptied the finishing order of long bicycle and foot races.
+     */
+    crashNominalDurationS: 3600,
 
     /** Time cost ranges, seconds. */
     lockupCostS: [0.3, 1.2] as const,
     spinCostS: [3.0, 9.0] as const,
+    /**
+     * A crash-severity moment that is survived: a fall and remount, a run-off, a
+     * spin through the gravel. Costs much more than an ordinary spin, but the
+     * racer continues — which is what a runner or cyclist almost always does.
+     */
+    crashRecoveryCostS: [12.0, 30.0] as const,
 
     /**
      * Time losses are booked as a debt and paid off by running slower, rather
