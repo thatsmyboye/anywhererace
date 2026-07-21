@@ -13,6 +13,12 @@ import tailwind from '@tailwindcss/vite';
 export default defineConfig({
   base: './',
   plugins: [react(), tailwind()],
+  server: {
+    // Honor PORT when something upstream assigns one. Vite otherwise takes
+    // 5173, finds it busy, and silently walks to the next free port — which
+    // leaves anything that was told where to look pointing at nothing.
+    ...(process.env.PORT ? { port: Number(process.env.PORT) } : {}),
+  },
   build: {
     target: 'es2022',
     sourcemap: true,

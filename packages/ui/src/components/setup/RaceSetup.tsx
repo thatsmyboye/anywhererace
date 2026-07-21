@@ -2,9 +2,11 @@ import { useCallback, useState } from 'react';
 import type { Track, WeatherProvider } from '@anywhererace/core';
 import { formatDurationS } from '@anywhererace/core';
 import type { GridOrder, RaceConfig } from '@anywhererace/sim';
+import { getVehicleClass } from '@anywhererace/sim';
 import type { RosterPresetSummary } from '@anywhererace/store';
 import { useRaceSetup } from '../../useRaceSetup';
 import { RosterTable } from './RosterTable';
+import { SeparationPoints } from './SeparationPoints';
 import { WeatherPicker } from './WeatherPicker';
 
 /**
@@ -47,6 +49,7 @@ export const RaceSetup = ({
   const setup = useRaceSetup({ track, weather });
   const { actions } = setup;
   const [presetName, setPresetName] = useState('');
+  const selectedFormat = getVehicleClass(setup.vehicleClassId)?.raceFormat ?? 'standard';
 
   const savePreset = useCallback(() => {
     const name = presetName.trim() === '' ? `Roster of ${setup.roster.length}` : presetName.trim();
@@ -159,6 +162,13 @@ export const RaceSetup = ({
             length and shape, so it makes a new track rather than editing this one.
           </p>
         )}
+
+        {/* Only for the bunch-racing classes: for a motor race the answer is
+            uninteresting, since the field is strung out by lap two whatever the
+            road does. */}
+        {selectedFormat === 'cycling' ? (
+          <SeparationPoints points={track.separationPoints} />
+        ) : null}
 
         <WeatherPicker
           mode={setup.weatherMode}

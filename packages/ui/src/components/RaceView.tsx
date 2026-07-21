@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Track } from '@anywhererace/core';
 import type { DebugToggles, RaceConfig, RaceResult } from '@anywhererace/sim';
+import { getVehicleClass } from '@anywhererace/sim';
 import { EventFeed } from './EventFeed';
 import { PlaybackControls } from './PlaybackControls';
 import { RaceMap } from './RaceMap';
@@ -79,6 +80,11 @@ export const RaceView = ({
   }
 
   const totalLaps = track.mode === 'circuit' ? config.laps : 1;
+  // How this race should be narrated. v1 runs one class for the whole field, so
+  // the class settles it — see `RaceFormat`. An unknown class would already have
+  // failed the race setup, so falling back to 'standard' only ever means
+  // "show everything", which is the safe way to be wrong.
+  const format = getVehicleClass(config.vehicleClassId)?.raceFormat ?? 'standard';
 
   return (
     <div className="relative h-full w-full bg-[#0b0e13]">
@@ -107,7 +113,7 @@ export const RaceView = ({
           </div>
 
           <div className="pointer-events-auto">
-            <EventFeed events={race.feed} racersById={race.racersById} />
+            <EventFeed events={race.feed} racersById={race.racersById} format={format} />
           </div>
         </div>
 

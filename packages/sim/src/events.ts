@@ -43,6 +43,22 @@ export type SectorEvent = EventBase & {
   raceBest: boolean;
 };
 
+/**
+ * How much a pass is worth saying out loud.
+ *
+ * Every pass is still logged — this only says which ones matter, so a consumer
+ * can decide without re-deriving the field's shape. It exists because a bunch
+ * race generates hundreds of position changes that mean nothing: forty riders
+ * shuffling inside a peloton is not forty overtakes, it is one peloton.
+ */
+export type PassSignificance =
+  /** For the race lead. Always worth reporting, in any format. */
+  | 'lead-change'
+  /** The two racers were in different groups on the road: real ground changed hands. */
+  | 'between-groups'
+  /** A shuffle inside a single bunch. The noise a cycling feed suppresses. */
+  | 'in-group';
+
 export type OvertakeEvent = EventBase & {
   type: 'overtake';
   racerId: RacerId;
@@ -51,6 +67,48 @@ export type OvertakeEvent = EventBase & {
   /** Position the passer moved into. */
   forPosition: number;
   distanceM: number;
+  /**
+   * Classified against the group structure at the time of the pass. Always
+   * present — the sim knows which group each racer was in and a consumer does
+   * not, so leaving this to be inferred downstream would mean inferring it
+   * wrong.
+   */
+  significance: PassSignificance;
+};
+
+/** What happened to the shape of the field. See `groups.ts`. */
+export type GroupEventKind =
+  /** One racer went clear of the group they were in. */
+  | 'attack'
+  /** One racer crossed the gap from their group to the one ahead. */
+  | 'bridge'
+  /** A group came apart into two. */
+  | 'split'
+  /** A group caught the one ahead and the two became one. */
+  | 'catch'
+  /** One racer came off the back of the group they were in. */
+  | 'dropped';
+
+/**
+ * A change in the shape of the field: the unit a bunch race is actually told
+ * in. Emitted for every race, not just cycling ones — a strung-out field simply
+ * produces very few of them, which is itself the correct description of it.
+ */
+export type GroupEvent = EventBase & {
+  type: 'group';
+  kind: GroupEventKind;
+  /**
+   * The racer the move is about: the attacker, the bridger, the dropped rider.
+   * Absent for `split` and `catch`, which are about groups rather than anyone
+   * in particular.
+   */
+  racerId?: RacerId;
+  /** Racers in the group at the front of the move, front to back. */
+  frontGroup: RacerId[];
+  /** Racers in the group behind it, front to back. */
+  chaseGroup: RacerId[];
+  /** Road gap between the two groups at the moment the move was confirmed. */
+  gapS: number;
 };
 
 export type FailedPassEvent = EventBase & {
@@ -105,6 +163,7 @@ export type RaceEvent =
   | LapEvent
   | SectorEvent
   | OvertakeEvent
+  | GroupEvent
   | FailedPassEvent
   | MistakeEvent
   | CrashEvent

@@ -1,6 +1,8 @@
 import type { Result } from '@anywhererace/core';
 import { clamp01, conditionsAt, err, ok } from '@anywhererace/core';
 import type { RaceEvent } from './events';
+import type { GroupMember } from './groups';
+import { GroupTracker, classifyPass } from './groups';
 import { hashResult } from './hash';
 import type { TrackProfile, WindProfile } from './profile';
 import { buildTrackProfile, buildWindProfile, windAt } from './profile';
@@ -73,6 +75,12 @@ class Race implements RaceRunner {
   private readonly mechanicalHazardPerTick: number;
   private readonly crashDnfChanceValue: number;
   private readonly lastPassS = new Map<string, number>();
+  /**
+   * The shape of the field: who is riding with whom. Pure observation — it
+   * reads distances and speeds and emits events, and nothing in the tick ever
+   * consults it, so it cannot affect a result. See `groups.ts`.
+   */
+  private readonly groups = new GroupTracker();
   /** Last tick's ordering among racers still circulating, by racer id. */
   private previousRanks = new Map<string, number>();
 
@@ -163,8 +171,26 @@ class Race implements RaceRunner {
     }
 
     this.assignPositions();
+    // Before overtake detection: a pass is classified against the settled shape
+    // of the field, so the shape has to be up to date first.
+    this.groups.sample(this.groupMembers(), this.currentTick, this.elapsedS, (event) =>
+      this.events.push(event),
+    );
     this.detectOvertakes();
     this.checkTermination();
+  }
+
+  private groupMembers(): GroupMember[] {
+    const members: GroupMember[] = [];
+    for (const racer of this.setup.racers) {
+      if (racer.status !== 'racing') continue;
+      members.push({
+        id: racer.spec.id,
+        distanceM: racer.distanceM,
+        speedMs: racer.speedMs,
+      });
+    }
+    return members;
   }
 
   /** Racing and finished racers by distance, front to back. */
@@ -383,6 +409,15 @@ class Race implements RaceRunner {
             victimId: victim.spec.id,
             forPosition: passer.position,
             distanceM: passer.distanceM,
+            // Classified here rather than downstream: only the sim knows which
+            // group each racer was in, and a consumer left to infer it from
+            // positions alone would infer it wrong.
+            significance: classifyPass(
+              this.groups.grouping,
+              passer.spec.id,
+              victim.spec.id,
+              passer.position,
+            ),
           });
         }
       }

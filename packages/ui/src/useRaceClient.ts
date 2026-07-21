@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Track } from '@anywhererace/core';
 import type { DebugToggles, RaceConfig, RaceEvent, RaceResult, RaceSnapshot } from '@anywhererace/sim';
 import type { ErrorMessage, PlaybackSpeed, RaceClient, RacerIdentity } from '@anywhererace/worker';
+import { getVehicleClass } from '@anywhererace/sim';
 import { createRaceClient } from '@anywhererace/worker';
+import { isBroadcastable } from './feed';
 import type { RacerAppearance } from './palette';
 import { buildPalette } from './palette';
 
@@ -91,6 +93,13 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
     let disposed = false;
     const worker = createWorker();
 
+    // How this race is narrated: v1 runs one class for the whole field, so the
+    // class settles it. Derived here rather than at hook level because the
+    // effect already keys on `config.vehicleClassId` — the one thing it can
+    // change with. An unknown class falls back to showing everything, which is
+    // the safe way to be wrong.
+    const format = getVehicleClass(config.vehicleClassId)?.raceFormat ?? 'standard';
+
     const client = createRaceClient({
       worker,
       track,
@@ -126,8 +135,17 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
           setSnapshot(next);
           setProgress(frameProgress);
           if (newEvents.length > 0) {
+            // The full log is kept whole — the results page, the charts and the
+            // race report all read it. Only the capped feed is filtered, and it
+            // has to be filtered *before* the cap: a bunch race emits thousands
+            // of in-bunch position changes, so capping the raw log first would
+            // leave the last forty events containing nothing showable and the
+            // feed blank for most of the race.
             setEvents((current) => [...current, ...newEvents]);
-            setFeed((current) => [...newEvents, ...current].slice(0, eventFeedLength));
+            const showable = newEvents.filter((event) => isBroadcastable(event, format));
+            if (showable.length > 0) {
+              setFeed((current) => [...showable, ...current].slice(0, eventFeedLength));
+            }
           }
           setStatus((current) => (current === 'finished' ? current : 'running'));
         },

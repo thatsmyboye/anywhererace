@@ -288,6 +288,29 @@ const printIncidents = (events: readonly RaceEvent[], nameById: Map<string, stri
   const passes = eventsOfType(events, 'overtake');
   const failed = eventsOfType(events, 'failed-pass');
   console.log(`\n${passes.length} overtakes, ${failed.length} failed attempts.`);
+
+  // What a bunch-race feed would actually broadcast, against everything it
+  // could have. This is the number to watch when tuning `TUNING.groups`: the
+  // suppression is doing its job when the second figure is a small fraction of
+  // the first, and it has gone too far when the first stops moving at all.
+  const moves = eventsOfType(events, 'group');
+  const notable = passes.filter((pass) => pass.significance === 'lead-change').length + moves.length;
+  console.log(
+    `${notable} worth broadcasting: ${moves.length} group moves ` +
+      `(${summarizeKinds(moves)}), ` +
+      `${passes.filter((p) => p.significance === 'lead-change').length} for the lead. ` +
+      `${passes.filter((p) => p.significance === 'in-group').length} were in-bunch shuffling.`,
+  );
+};
+
+const summarizeKinds = (moves: readonly { kind: string }[]): string => {
+  const counts = new Map<string, number>();
+  for (const move of moves) counts.set(move.kind, (counts.get(move.kind) ?? 0) + 1);
+  if (counts.size === 0) return 'none';
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, count]) => `${count} ${kind}`)
+    .join(', ');
 };
 
 const printEventLog = (events: readonly RaceEvent[], nameById: Map<string, string>): void => {

@@ -1,5 +1,8 @@
 
+import type { RaceFormat } from '@anywhererace/core';
 import type { RaceEvent } from '@anywhererace/sim';
+import type { NotableEvent } from '../feed';
+import { describeEvent, eventLabel, isBroadcastable } from '../feed';
 import type { RacerView } from '../useRaceClient';
 
 /**
@@ -12,18 +15,41 @@ import type { RacerView } from '../useRaceClient';
  *
  * Only the events a spectator would point at are shown. Sector and lap
  * crossings are in the log but would drown everything else at forty racers.
+ *
+ * **What counts as notable depends on the format.** A motor race is told pass
+ * by pass and every one of them is worth showing. A bunch race is not: a
+ * 24-rider peloton generates around two thousand position changes in an hour,
+ * essentially all of them riders shuffling inside the same group, and showing
+ * them buries the twenty-odd moments that decide the race. So a cycling feed
+ * drops in-bunch shuffling and shows what a commentator would call instead —
+ * the attacks, the bridges, the splits, the catches — which the sim has already
+ * classified for us in `groups.ts`. Nothing is discarded from the log; this is
+ * purely which of it reaches the screen.
  */
 
 export type EventFeedProps = {
   events: readonly RaceEvent[];
   racersById: ReadonlyMap<string, RacerView>;
   limit?: number;
+  /**
+   * Which broadcast rule to apply. Defaults to `'standard'` — show everything —
+   * so a caller that has not thought about it gets the old behavior rather than
+   * a silently quieter race.
+   */
+  format?: RaceFormat;
 };
 
 const DEFAULT_LIMIT = 8;
 
-export const EventFeed = ({ events, racersById, limit = DEFAULT_LIMIT }: EventFeedProps) => {
-  const notable = events.filter(isNotable).slice(0, limit);
+export const EventFeed = ({
+  events,
+  racersById,
+  limit = DEFAULT_LIMIT,
+  format = 'standard',
+}: EventFeedProps) => {
+  // The client has usually filtered already; filtering again is cheap and keeps
+  // the component correct for a caller that hands it a raw log.
+  const notable = events.filter((event) => isBroadcastable(event, format)).slice(0, limit);
   if (notable.length === 0) return null;
 
   return (
@@ -35,10 +61,10 @@ export const EventFeed = ({ events, racersById, limit = DEFAULT_LIMIT }: EventFe
         >
           <span className="shrink-0 tabular-nums text-[#8d9bb0]">{clockLabel(event.atS)}</span>
           <span className={`shrink-0 font-semibold uppercase ${toneClass(event)}`}>
-            {label(event)}
+            {eventLabel(event)}
           </span>
           <span className="min-w-0 flex-1 truncate text-[#e6ebf2]">
-            {describe(event, racersById)}
+            {describeEvent(event, (id) => racersById.get(id)?.name ?? id)}
           </span>
         </li>
       ))}
@@ -57,37 +83,14 @@ const clockLabel = (seconds: number): string => {
   return `${minutes}:${String(whole % 60).padStart(2, '0')}`;
 };
 
-type NotableEvent = Extract<
-  RaceEvent,
-  { type: 'overtake' | 'mistake' | 'crash' | 'mechanical' | 'finish' }
->;
-
-const isNotable = (event: RaceEvent): event is NotableEvent =>
-  event.type === 'overtake' ||
-  event.type === 'mistake' ||
-  event.type === 'crash' ||
-  event.type === 'mechanical' ||
-  event.type === 'finish';
-
-const label = (event: NotableEvent): string => {
-  switch (event.type) {
-    case 'overtake':
-      return 'Pass';
-    case 'mistake':
-      return event.kind === 'spin' ? 'Spin' : 'Lock-up';
-    case 'crash':
-      return 'Crash';
-    case 'mechanical':
-      return 'Mech';
-    case 'finish':
-      return 'Finish';
-  }
-};
-
 const toneClass = (event: NotableEvent): string => {
   switch (event.type) {
     case 'overtake':
       return 'text-[#3ddc97]';
+    case 'group':
+      // Group moves read as the same kind of good news as a pass, except a
+      // rider going out the back, which is a loss like a mistake is.
+      return event.kind === 'dropped' ? 'text-[#ffb020]' : 'text-[#3ddc97]';
     case 'mistake':
       return 'text-[#ffb020]';
     case 'crash':
@@ -95,22 +98,5 @@ const toneClass = (event: NotableEvent): string => {
       return 'text-[#ff5c5c]';
     case 'finish':
       return 'text-[#4da3ff]';
-  }
-};
-
-const describe = (event: NotableEvent, racersById: ReadonlyMap<string, RacerView>): string => {
-  const name = (id: string): string => racersById.get(id)?.name ?? id;
-
-  switch (event.type) {
-    case 'overtake':
-      return `${name(event.racerId)} past ${name(event.victimId)} for P${event.forPosition}`;
-    case 'mistake':
-      return `${name(event.racerId)}${event.causedByPassAttempt ? ', move gone wrong' : ''} — ${event.timeLostS.toFixed(1)}s`;
-    case 'crash':
-      return `${name(event.racerId)} is out on lap ${event.lap + 1}`;
-    case 'mechanical':
-      return `${name(event.racerId)} stops on lap ${event.lap + 1}`;
-    case 'finish':
-      return `${name(event.racerId)} takes P${event.position}`;
   }
 };

@@ -1,6 +1,7 @@
 // The React layer: race view, timing tower, map rendering.
 // Depends on worker, track, sim and core; never the reverse.
 
+export * from './feed';
 export * from './palette';
 export * from './markers';
 export * from './useRaceClient';
@@ -22,6 +23,8 @@ export type { TrackBuilderProps } from './components/builder/TrackBuilder';
 export { BuilderMap } from './components/builder/BuilderMap';
 export { ElevationProfile } from './components/builder/ElevationProfile';
 export { RaceSetup } from './components/setup/RaceSetup';
+export { SeparationPoints } from './components/setup/SeparationPoints';
+export type { SeparationPointsProps } from './components/setup/SeparationPoints';
 export type { RaceSetupProps } from './components/setup/RaceSetup';
 export { RosterTable } from './components/setup/RosterTable';
 export { WeatherPicker } from './components/setup/WeatherPicker';
