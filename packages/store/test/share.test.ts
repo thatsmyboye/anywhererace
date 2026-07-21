@@ -110,6 +110,20 @@ describe('shared race codec', () => {
     expect(decoded.error.kind).toBe('incomplete');
   });
 
+  it('re-runs to the identical hash after a round trip', () => {
+    // The mismatch banner's whole premise: on the same build, replaying a
+    // decoded link reproduces the exact result. If the track lost its Infinity
+    // curvatures, or any field drifted through the codec, this hash would move
+    // and every honest share would falsely accuse itself of a version mismatch.
+    const race = makeSharedRace();
+    const decoded = decodeSharedRace(encodeSharedRace(race));
+    if (!decoded.ok) throw new Error('expected a decode');
+
+    const rerun = runRace({ track: decoded.value.track, config: decoded.value.config });
+    if (!rerun.ok) throw new Error(`replay failed: ${rerun.error.message}`);
+    expect(rerun.value.resultHash).toBe(race.resultHash);
+  });
+
   it('preserves the simVersion so the viewer can flag a mismatch', () => {
     // The mismatch banner leans on this surviving the trip untouched.
     const race = { ...makeSharedRace(), simVersion: '9.9.9' };
