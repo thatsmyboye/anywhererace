@@ -499,8 +499,6 @@ which also means they are tested against real races rather than fixtures.
 
 ## 23. Not built at all
 
-- `SharedRace`, the compressed URL payload, `simVersion` mismatch banner, OG
-  images
 - Supabase, and any sync beyond this browser
 - The debug panel that toggles tick steps 2-5. The toggles exist and are wired
   through the worker; nothing exposes them in the UI yet.
@@ -547,3 +545,55 @@ What is still judgment:
   of `dnf-timeout`, not a phantom pile-up, but whether the cap itself should
   scale with course length rather than being a flat six hours is an open
   question. See `sanity-ranges.test.ts`, "finishing is the common case".
+
+---
+
+## 25. Sharing: built client-side; the per-race OG image needs a server
+
+The last item on CLAUDE.md's list — the compressed URL payload, the mismatch
+banner for a genuinely shared race, and OG images — is now built, with one
+honest gap.
+
+What is built:
+
+- **`SharedRace` and its codec** (`packages/store/src/share.ts`). A race travels
+  as its *inputs*, not a recording: the baked track, config, seed, `simVersion`
+  and `resultHash`, as JSON → gzip → base64url behind a one-character wire tag.
+  Round-trip and rejection paths are tested.
+- **The embedded baked track — a deliberate deviation from CLAUDE.md.** The
+  `SharedRace` sketch in CLAUDE.md carries "waypoints + routingProfile only;
+  nodes are re-baked". That cannot be right: re-baking needs the router and the
+  DEM, and replay must never re-fetch. The user's brief confirmed the track
+  must be embedded. So the whole baked track rides along, which is also what a
+  stored race already does. The cost is payload size (see below).
+- **Non-finite numbers survive the trip.** A straight node stores
+  `curvatureRadius: Infinity`, which JSON writes as `null`. Left alone, every
+  decoded straight would corner and every shared link would trip its own
+  mismatch banner. They travel as sentinel strings instead. This is the sort of
+  bug that only the round-trip test catches.
+- **Opening a link** (`apps/web`): the payload is read from `?r=` synchronously
+  at startup, decoded, and opened read-only in the existing `RaceView`. The
+  viewer's build re-runs the race and, via `savedAs`, compares the recomputed
+  hash — so the honest mismatch banner is the same one saved-race replay uses.
+  A corrupt, truncated, or newer-schema link gets a plain error screen.
+- **Sharing a link**: a "Share" button on the results copies the URL. A course
+  too big for a URL says so rather than copying a link that breaks in transit.
+
+What is judgment or deferred:
+
+- **`URL_SAFE_PAYLOAD_MAX` is 6000 characters.** The URL spec has no length
+  limit, but unfurlers and address bars truncate somewhere north of a few
+  thousand. Most real (multi-hundred-node) tracks exceed this and want the
+  **Supabase short-link fallback, which is not wired up** — there is no backend
+  in this repo yet. The button is honest about it.
+- **The OG image is a pure generator without a server to run it.**
+  `buildRaceOgSvg` (`packages/store/src/og.ts`) renders the track shape, winner
+  and margin as an SVG from a race's inputs, tested and framework-free so it can
+  run in a serverless function. But this is a static SPA: a crawler never runs
+  the JS that would set per-race meta. Serving a per-race card needs a
+  request-time renderer that decodes `?r=`, calls `buildRaceOgSvg`, and rewrites
+  the `og:*` tags. Until that host exists, `index.html` carries app-level OG
+  defaults and the per-race card is the documented next step. (Two further
+  gaps for that host: rasterizing SVG → PNG, since the major social platforms
+  render PNG far more reliably than SVG; and the short-link store, which the OG
+  renderer and the share button would share.)
