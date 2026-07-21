@@ -1,0 +1,14 @@
+{
+  "name": "@anywhererace/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "anywhererace": "./src/main.ts"
+  },
+  "dependencies": {
+    "@anywhererace/core": "workspace:*",
+    "@anywhererace/sim": "workspace:*",
+    "@anywhererace/track": "workspace:*"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "anywhererace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @anywhererace/web dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:determinism": "vitest run --project sim determinism",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "race": "tsx apps/cli/src/main.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^3.0.5"
+  }
+}
