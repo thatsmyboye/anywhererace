@@ -26,6 +26,15 @@ export type RouteLegRequest = {
   from: LatLng;
   to: LatLng;
   profile: RoutingProfile;
+  /**
+   * How much the caller needs to know about the road, not just its shape.
+   *
+   * `geometry` (the default) is what the track builder asks for while the user
+   * is dragging a waypoint: fast, and enough to draw the route. `full` also
+   * resolves per-edge surface and width, which a real router may have to make
+   * a second request for — so it is only asked for when a track is baked.
+   */
+  detail?: 'geometry' | 'full';
 };
 
 export type RouteLeg = {

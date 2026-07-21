@@ -4,6 +4,7 @@ import type {
   Result,
   RouteAnnotation,
   RouteJunction,
+  RouteLeg,
   RoutingError,
   RoutingProfile,
   RoutingProvider,
@@ -65,11 +66,87 @@ export const buildTrack = async (
 
   const routed = await routeAllLegs(input);
   if (!routed.ok) return routed;
-  const { polyline, annotations, junctions } = routed.value;
+
+  return bakeRoutedTrack({
+    id: input.id,
+    name: input.name,
+    mode,
+    routingProfile: input.routingProfile,
+    waypoints,
+    routed: routed.value,
+    elevation: input.elevation,
+  });
+};
+
+export type RoutedRoute = {
+  polyline: LatLng[];
+  annotations: RouteAnnotation[];
+  junctions: RouteJunction[];
+};
+
+/**
+ * Join consecutive legs into one route.
+ *
+ * The first point of every leg after the first duplicates the last point of the
+ * previous one, so it is dropped and every annotation and junction index shifts
+ * to match. Exported because the track builder routes legs incrementally as the
+ * user edits and needs to assemble them without routing again.
+ */
+export const concatenateLegs = (legs: readonly RouteLeg[]): RoutedRoute => {
+  const polyline: LatLng[] = [];
+  const annotations: RouteAnnotation[] = [];
+  const junctions: RouteJunction[] = [];
+
+  for (const leg of legs) {
+    const dropFirst = polyline.length > 0;
+    const offset = polyline.length - (dropFirst ? 1 : 0);
+    const points = dropFirst ? leg.polyline.slice(1) : leg.polyline;
+
+    for (const annotation of leg.annotations) {
+      annotations.push({
+        ...annotation,
+        startIndex: annotation.startIndex + offset,
+        endIndex: annotation.endIndex + offset,
+      });
+    }
+    for (const junction of leg.junctions) {
+      junctions.push({ ...junction, atIndex: junction.atIndex + offset });
+    }
+    polyline.push(...points);
+  }
+
+  return { polyline, annotations, junctions };
+};
+
+export type BakeRoutedInput = {
+  id: string;
+  name: string;
+  mode: TrackMode;
+  routingProfile: RoutingProfile;
+  waypoints: readonly LatLng[];
+  routed: RoutedRoute;
+  elevation: ElevationProvider;
+};
+
+/**
+ * Everything after routing: closure check, elevation lookup, bake.
+ *
+ * Split out from `buildTrack` so the builder — which has already routed each
+ * leg as the user placed it — can finish a track without asking the router to
+ * do all that work a second time.
+ */
+export const bakeRoutedTrack = async (
+  input: BakeRoutedInput,
+): Promise<Result<Track, TrackError>> => {
+  const { routed, mode } = input;
+
+  if (routed.polyline.length < 2) {
+    return err({ kind: 'too-few-waypoints', message: 'This route has no geometry to bake.' });
+  }
 
   if (mode === 'circuit') {
-    const first = polyline[0] as LatLng;
-    const last = polyline[polyline.length - 1] as LatLng;
+    const first = routed.polyline[0] as LatLng;
+    const last = routed.polyline[routed.polyline.length - 1] as LatLng;
     const gapM = haversineMeters(first, last);
     if (gapM > BAKE.circuitClosureToleranceM) {
       return err({
@@ -80,14 +157,14 @@ export const buildTrack = async (
     }
   }
 
-  const elevations = await lookupElevations(input, polyline, mode);
+  const elevations = await lookupElevations(input.elevation, routed.polyline, mode);
   if (!elevations.ok) return elevations;
 
   const baked = bakeNodes({
-    polyline,
+    polyline: routed.polyline,
     mode,
-    annotations,
-    junctions,
+    annotations: routed.annotations,
+    junctions: routed.junctions,
     elevations: elevations.value,
   });
 
@@ -96,22 +173,14 @@ export const buildTrack = async (
     name: input.name,
     mode,
     routingProfile: input.routingProfile,
-    waypoints: waypoints.slice(),
-    // Pinned, not re-derived. If OSM changes under us, an old shared link must
-    // still replay the road layout the race was created on.
-    polyline,
+    waypoints: input.waypoints.slice(),
+    polyline: routed.polyline,
     nodes: baked.nodes,
     lengthMeters: baked.lengthMeters,
     startLine: 0,
     finishLine: baked.lengthMeters,
     sectors: defaultSectors(baked.lengthMeters),
   });
-};
-
-type RoutedRoute = {
-  polyline: LatLng[];
-  annotations: RouteAnnotation[];
-  junctions: RouteJunction[];
 };
 
 const routeAllLegs = async (
@@ -127,9 +196,7 @@ const routeAllLegs = async (
     pairs.push([waypoints[waypoints.length - 1] as LatLng, waypoints[0] as LatLng]);
   }
 
-  const polyline: LatLng[] = [];
-  const annotations: RouteAnnotation[] = [];
-  const junctions: RouteJunction[] = [];
+  const legs: RouteLeg[] = [];
 
   for (let legIndex = 0; legIndex < pairs.length; legIndex++) {
     const [from, to] = pairs[legIndex] as [LatLng, LatLng];
@@ -145,26 +212,10 @@ const routeAllLegs = async (
       });
     }
 
-    // The first point of every leg after the first duplicates the last point of
-    // the previous one, so it is dropped and every index shifts accordingly.
-    const dropFirst = polyline.length > 0;
-    const offset = polyline.length - (dropFirst ? 1 : 0);
-    const points = dropFirst ? leg.value.polyline.slice(1) : leg.value.polyline;
-
-    for (const annotation of leg.value.annotations) {
-      annotations.push({
-        ...annotation,
-        startIndex: annotation.startIndex + offset,
-        endIndex: annotation.endIndex + offset,
-      });
-    }
-    for (const junction of leg.value.junctions) {
-      junctions.push({ ...junction, atIndex: junction.atIndex + offset });
-    }
-    polyline.push(...points);
+    legs.push(leg.value);
   }
 
-  return ok({ polyline, annotations, junctions });
+  return ok(concatenateLegs(legs));
 };
 
 /**
@@ -198,19 +249,19 @@ const legFailureMessage = (
 };
 
 const lookupElevations = async (
-  input: BuildTrackInput,
+  elevation: ElevationProvider,
   polyline: readonly LatLng[],
   mode: TrackMode,
 ): Promise<Result<number[], TrackError>> => {
   // Sample the DEM at exactly the baked node positions, so gradient never has
   // to be interpolated from somewhere else.
   const { points } = resampleForBake(polyline, mode);
-  const batchSize = Math.max(1, input.elevation.maxBatchSize);
+  const batchSize = Math.max(1, elevation.maxBatchSize);
   const elevations: number[] = [];
 
   for (let start = 0; start < points.length; start += batchSize) {
     const batch = points.slice(start, start + batchSize);
-    const result = await input.elevation.lookup(batch);
+    const result = await elevation.lookup(batch);
     if (!result.ok) {
       return err({
         kind: 'elevation-failed',

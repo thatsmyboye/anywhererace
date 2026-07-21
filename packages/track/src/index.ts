@@ -7,5 +7,6 @@ export * from './curvature';
 export * from './surface';
 export * from './bake';
 export * from './build';
+export * from './preview';
 export * from './position';
 export * from './compatibility';

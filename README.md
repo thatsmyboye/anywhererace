@@ -9,9 +9,9 @@ guess rather than a decision.
 
 ## Status
 
-You can watch a race. The simulation, the track baker, the Web Worker host and
-the race view are built and tested; the track builder and race setup screens are
-not.
+You can draw a track on real streets, save it, and race it. The simulation, the
+track baker, the Web Worker host, the race view and the track builder are built
+and tested; race setup and the results page are not.
 
 | Package | State |
 |---|---|
@@ -19,30 +19,33 @@ not.
 | `packages/sim` | The deterministic race engine — 11 vehicle classes, 10 archetypes, full tick |
 | `packages/track` | Routing, resampling, curvature, gradient, surface, junctions, render geometry |
 | `packages/worker` | Hosts the sim in a Web Worker: playback, fast-forward, seeking |
-| `packages/ui` | Race view — MapLibre map, timing tower, event feed, transport controls |
-| `apps/web` | Vite app shell, currently loading a demo race |
+| `packages/store` | Local-first persistence on IndexedDB |
+| `packages/ui` | Race view and track builder |
+| `apps/web` | Vite app shell — track list, builder, race view |
 | `apps/cli` | Headless race runner, for tuning |
 
-Not built: the track builder, race setup, the results page, sharing, and
-persistence.
+Not built: race setup (vehicle, laps, weather, roster), the results page, and
+sharing.
 
-Every external service is behind an interface with a mock implementation. The
-tests never touch the network, and the app runs with no API keys at all.
+Every external service is behind an interface with a mock implementation, and
+each falls back independently at runtime. The tests never touch the network, and
+the app runs with no API keys at all.
 
 ## Getting started
 
 ```bash
 pnpm install
 pnpm dev           # http://localhost:5173
-pnpm test          # 168 tests
+pnpm test          # 219 tests
 pnpm typecheck
 pnpm lint
 ```
 
 ### Basemap key (optional)
 
-The app runs without one, on a blank background, and tells you so. For a real
-map, put a [MapTiler](https://cloud.maptiler.com/account/keys/) key in
+Routing works without it — only the basemap tiles need a key. The app runs
+without one, on a blank background, and tells you so. For a real map, put a
+[MapTiler](https://cloud.maptiler.com/account/keys/) key in
 `apps/web/.env.local`:
 
 ```
@@ -53,9 +56,22 @@ That file is gitignored. The key ships to the browser and is therefore public �
 restrict it by HTTP referrer in the MapTiler dashboard to the domains that
 should use it.
 
+## Drawing a track
+
+`pnpm dev` opens the track list. **New track** gives you a map: click to add a
+waypoint, drag one to move it, click a waypoint to remove it, Ctrl+Z to undo.
+Each leg is routed as you place it against
+[Valhalla](https://valhalla.github.io/valhalla/), so the route follows real
+streets and respects one-way restrictions — and a leg that cannot be driven is
+drawn as a dashed red line and named in the waypoint list rather than failing
+quietly at save time.
+
+Saving bakes the track at 5m resolution with real gradients and stores it in
+IndexedDB, so it survives a reload and races offline.
+
 ## Watching a race
 
-`pnpm dev` opens the race view on a demo track: a map with the field on it, a
+The race view opens from **Race it** on any saved track: a map with the field on it, a
 live timing tower, an event feed, and pause / 1x / 2x / 8x / skip-to-end. Once a
 race finishes, a scrubber appears.
 
@@ -112,11 +128,12 @@ with the reason in the message. `pnpm test:determinism` is the check.
 
 ```
 packages/
-  core/    # shared types, units, geo math, provider interfaces + mocks
+  core/    # shared types, units, geo math, provider interfaces + adapters
   sim/     # the deterministic race engine (no DOM, no React)
   track/   # track building: routing, resampling, curvature, gradient, surface
   worker/  # hosts the sim in a Web Worker; playback, seeking, wire protocol
-  ui/      # React race view: map, timing tower, event feed, controls
+  store/   # local-first persistence on IndexedDB
+  ui/      # React: race view and track builder
 apps/
   web/     # Vite app shell
   cli/     # headless race runner

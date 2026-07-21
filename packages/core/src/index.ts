@@ -15,6 +15,10 @@ export * from './providers/elevation';
 export * from './providers/weather';
 export * from './providers/tiles';
 export * from './providers/maptiler';
+export * from './providers/polyline';
+export * from './providers/valhalla';
+export * from './providers/opentopodata';
+export * from './providers/fallback';
 
 export * from './providers/mock/routing';
 export * from './providers/mock/elevation';

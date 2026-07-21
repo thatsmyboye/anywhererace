@@ -144,12 +144,18 @@ sharp-turn curve are invented.
 
 ---
 
-## 8. All external providers are mocks
+## 8. Provider adapters: real now, but thinly exercised
 
-**Where:** `packages/core/src/providers/mock/`
+**Where:** `packages/core/src/providers/`
 
-Per your decision, no real adapters were written. The mocks produce
-*realistically shaped* data, not real data:
+Valhalla and Open-Topo-Data adapters exist and are wired up, each with the mock
+behind it as a fallback. Both are tested against stubbed `fetch` — no test
+touches the network — which means their *response handling* is covered but their
+agreement with the real services' actual payloads is only as good as my reading
+of the docs. Valhalla has been exercised live (see §18); Open-Topo-Data has not.
+
+The mocks remain as the fallback, and produce *realistically shaped* data, not
+real data:
 
 - **Routing** invents a smooth wandering path between waypoints with uneven
   vertex spacing, mixed surfaces and turn-angle junctions. It is not a road
@@ -158,8 +164,8 @@ Per your decision, no real adapters were written. The mocks produce
 - **Weather** is constant or linearly drifting.
 - **Tiles** is a blank background with no network requests.
 
-The Valhalla, Open-Meteo, and Open-Topo-Data adapters are the next thing to
-write. The interfaces they must satisfy are already fixed and tested.
+Open-Meteo is still unwritten — weather is the one provider with no real
+adapter, so every race is run on hand-specified conditions.
 
 ---
 
@@ -310,17 +316,84 @@ than by looking at it. **Worth an eyeball before you trust the visual design.**
 
 ---
 
-## 16. Not built at all
+## 16. The track builder
 
-- The track builder — clicking waypoints, dragging to adjust, live snapped
-  route, elevation profile, corner count, undo/redo
+**Where:** `packages/ui/src/useTrackBuilder.ts`, `packages/ui/src/components/builder/`
+
+Design decisions were made with you at a checkpoint and recorded in CLAUDE.md.
+What follows is what I chose within them.
+
+- **Waypoint markers are DOM elements**, not a GL layer — the opposite of the
+  racers. There are a few dozen at most, they never move on their own, and they
+  need to be draggable, which MapLibre gives free on a `Marker`. The
+  forty-markers-at-60fps argument does not apply to something dragged one at a
+  time.
+- **The preview deliberately does not bake.** Curvature is pure geometry and
+  needs no DEM; the elevation profile is sampled every 50m and interpolated, so
+  a whole track fits in one request. The real 5m bake happens once, at save. The
+  50m spacing and the 700ms debounce are guesses, chosen to protect a
+  1000-call-a-day budget.
+- **Surface detail is a second Valhalla request** (`/trace_attributes`) and is
+  only asked for at bake time. During editing every leg is geometry-only.
+- **Leg caching keys on endpoints rounded to ~10cm.** Undo, redo and
+  drag-and-drag-back are all free; the rounding stops a sub-millimetre drag
+  from counting as a new leg.
+- **Junction detection is mine, not Valhalla's.** Valhalla names a junction's
+  *kind* but reports turn *type* rather than degrees, and does not raise a
+  maneuver for every hard corner — so the geometry is scanned for turns over 50
+  degrees as well. That threshold, and the 3-shape-point minimum separation
+  that stops one bend being reported as several, are both invented.
+- **Track ids** are timestamp plus random suffix. Fine locally; sharing will
+  want something content-addressed.
+
+## 17. Bugs found while driving the builder
+
+1. **Rapid clicks lost waypoints.** Every edit read `snapshot` from the render
+   closure, so four map clicks in one tick all applied to the same stale state
+   and three of the four vanished. History is now one piece of state updated
+   functionally — which also makes it safe under StrictMode, where React
+   deliberately invokes updaters twice and the old ref-mutating version would
+   have pushed duplicate undo entries.
+2. **The degraded banner never appeared.** Degradation was read through a getter
+   during render, so React had no reason to re-render when a service fell back
+   and the user was told everything was fine while being served synthetic
+   terrain. It is now a callback into state.
+3. **The "synthetic" badge lied.** One boolean covered both routing and
+   elevation, so a track with real Valhalla streets and a fallback DEM was
+   labelled as though the roads were invented. Recorded per service now, with
+   the reader tolerating the old shape.
+
+## 18. Things I could not verify here
+
+- **Open-Topo-Data was unreachable from this sandbox** (`Failed to fetch`),
+  while Valhalla returned HTTP 200. So the routing path is proven against the
+  real service and the elevation path is only proven against its fallback. I
+  could not tell whether the failure is this sandbox's network policy or a
+  missing CORS header on the public elevation API — **worth checking from a
+  real browser before trusting real gradients.**
+- **Still no screenshots.** The browser pane times out on the WebGL canvas, so
+  the builder was verified functionally: waypoints placed, legs routed against
+  live Valhalla, readouts computed, track saved to IndexedDB, reloaded, and
+  raced. The layout was checked through computed styles. It has not been
+  *looked* at.
+- **No React component or hook tests.** The pure logic underneath is well
+  covered (preview geometry, elevation sampling, providers, store), but
+  `useTrackBuilder` — where the waypoint-loss bug lived — is only covered by
+  manual browser verification. Worth adding `@testing-library/react`.
+- **Tailwind does not pick up new source directories without a dev-server
+  restart.** Adding `components/builder/` produced a page with no layout at all
+  until the server was restarted. Not a code bug, but it looks exactly like one.
+
+---
+
+## 19. Not built at all
+
 - Race setup — vehicle class, laps, weather, field size, the roster table,
   "randomize field", roster templates
 - The results page — lap chart, position-over-time, sector bests, incident
   timeline, generated narrative
 - `SharedRace`, the compressed URL payload, `simVersion` mismatch banner, OG
   images
-- IndexedDB / Dexie persistence, Supabase
-- Real provider adapters (§8) — the app still builds its demo track from mocks
+- Supabase, and any sync beyond this browser
 - The debug panel that toggles tick steps 2-5. The toggles exist and are wired
   through the worker; nothing exposes them in the UI yet.

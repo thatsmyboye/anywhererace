@@ -63,9 +63,19 @@ time against the field is mostly a rendering job.
 this nearly free — two seeds, same track, render both.
 
 **A "find nearest legal loop" helper** for circuit building on one-way networks.
-CLAUDE.md asks for this in the builder; it needs a real router to be worth
-writing, since the shape of the problem depends entirely on how Valhalla
-reports direction failures.
+CLAUDE.md asks for this in the builder. Now that a real router is wired up this
+is finally tractable: Valhalla reports an unroutable leg distinctly from an
+outage, so the builder already knows *which* corner is impossible — the missing
+piece is searching nearby positions for one that closes the loop.
+
+**Insert a waypoint into an existing leg.** Right now a waypoint can only be
+appended, so refining the middle of a long route means clearing and starting
+again. Dragging a point off the route line to split a leg is the standard
+gesture and the leg model already supports it.
+
+**Snap the drawn route to a saved track's start line.** Start and finish are
+currently pinned to the first waypoint; letting the user drag the line along the
+route would make circuits far more raceable.
 
 **Auto-follow camera modes.** The race view deliberately fits the whole track
 and then leaves the camera alone. Two modes were considered and parked: follow
