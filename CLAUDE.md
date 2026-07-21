@@ -436,10 +436,18 @@ racers**.
 
 These are unresolved. Ask before assuming:
 
-- Whether "real forecast" means the forecast *now* or the forecast for a scheduled
-  future start time.
 - Whether posted speed limits should cap non-racing vehicle classes (one-way and turn
   restrictions are in; speed limits currently are not).
 - Whether shared races are public-by-default or unlisted-by-link.
 - How to handle a shared track whose route no longer exists in current OSM data when a
   viewer tries to *fork and edit* it.
+
+### Resolved
+
+- **"Real forecast" means both, defaulting to now.** A race bakes the forecast for
+  the moment it was created unless the user picks a scheduled future start, in which
+  case it bakes the forecast for that instant. `WeatherSpec`'s `live` variant stores
+  `fetchedAt` and `startsAt` separately for exactly this reason, alongside the sampled
+  timeline. Either way the weather is baked once and never re-fetched at replay time.
+  The scheduled-start picker and the `beyond-forecast-horizon` error path are defined
+  in the provider interface but have no UI yet.
