@@ -27,7 +27,7 @@ export default tseslint.config(
   {
     // Build tooling reads its configuration from a default export; that is the
     // tools' contract, not a style choice we get to make.
-    files: ['*.config.js', '*.config.ts'],
+    files: ['**/*.config.js', '**/*.config.ts'],
     rules: { 'no-restricted-syntax': 'off' },
   },
   {

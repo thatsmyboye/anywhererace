@@ -29,7 +29,11 @@
       "@anywhererace/sim": ["packages/sim/src/index.ts"],
       "@anywhererace/sim/*": ["packages/sim/src/*"],
       "@anywhererace/track": ["packages/track/src/index.ts"],
-      "@anywhererace/track/*": ["packages/track/src/*"]
+      "@anywhererace/track/*": ["packages/track/src/*"],
+      "@anywhererace/worker": ["packages/worker/src/index.ts"],
+      "@anywhererace/worker/*": ["packages/worker/src/*"],
+      "@anywhererace/ui": ["packages/ui/src/index.ts"],
+      "@anywhererace/ui/*": ["packages/ui/src/*"]
     }
   }
 }

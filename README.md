@@ -9,34 +9,59 @@ guess rather than a decision.
 
 ## Status
 
-Foundation only. The simulation, the track baker, and the shared core are built
-and tested; there is no UI yet.
+You can watch a race. The simulation, the track baker, the Web Worker host and
+the race view are built and tested; the track builder and race setup screens are
+not.
 
 | Package | State |
 |---|---|
 | `packages/core` | Types, units, geo math, seeded RNG, provider interfaces + mocks |
 | `packages/sim` | The deterministic race engine — 11 vehicle classes, 10 archetypes, full tick |
-| `packages/track` | Routing, resampling, curvature, gradient, surface, junctions |
+| `packages/track` | Routing, resampling, curvature, gradient, surface, junctions, render geometry |
+| `packages/worker` | Hosts the sim in a Web Worker: playback, fast-forward, seeking |
+| `packages/ui` | Race view — MapLibre map, timing tower, event feed, transport controls |
+| `apps/web` | Vite app shell, currently loading a demo race |
 | `apps/cli` | Headless race runner, for tuning |
-| `packages/ui`, `apps/web` | Not built |
 
-Every external service is behind an interface with a mock implementation.
-Nothing in this repo touches the network, including the tests.
+Not built: the track builder, race setup, the results page, sharing, and
+persistence.
+
+Every external service is behind an interface with a mock implementation. The
+tests never touch the network, and the app runs with no API keys at all.
 
 ## Getting started
 
 ```bash
 pnpm install
-pnpm test          # 119 tests
+pnpm dev           # http://localhost:5173
+pnpm test          # 168 tests
 pnpm typecheck
 pnpm lint
 ```
 
+### Basemap key (optional)
+
+The app runs without one, on a blank background, and tells you so. For a real
+map, put a [MapTiler](https://cloud.maptiler.com/account/keys/) key in
+`apps/web/.env.local`:
+
+```
+VITE_MAPTILER_KEY=your-key-here
+```
+
+That file is gitignored. The key ships to the browser and is therefore public —
+restrict it by HTTP referrer in the MapTiler dashboard to the domains that
+should use it.
+
 ## Watching a race
 
-There is no map yet, so the CLI is how you see what the sim is doing. It builds
-a track from the mock providers, runs a race, and prints the classification, lap
-chart, incident timeline, and result hash.
+`pnpm dev` opens the race view on a demo track: a map with the field on it, a
+live timing tower, an event feed, and pause / 1x / 2x / 8x / skip-to-end. Once a
+race finishes, a scrubber appears.
+
+The CLI is the other way in, and still the fastest way to judge a tuning change.
+It builds a track from the mock providers, runs a race, and prints the
+classification, lap chart, incident timeline, and result hash.
 
 ```bash
 pnpm race                                     # defaults: cyclists, 3 laps
@@ -48,6 +73,17 @@ pnpm race --help
 
 Same seed, same result, every time. This tool found five real bugs in the sim
 during its first hour of existence; use it before trusting a tuning change.
+
+## Deploying
+
+`pnpm build` produces a static bundle in `apps/web/dist` with no server runtime.
+Asset URLs are relative, so the same build works from a domain root, a
+subdirectory, or a preview URL without rebuilding — copy `dist/` to any static
+host.
+
+The simulation worker is emitted as its own chunk, and MapLibre is split out
+separately so an app update does not force visitors to re-download the map
+engine.
 
 ## The rules that matter
 
@@ -79,8 +115,16 @@ packages/
   core/    # shared types, units, geo math, provider interfaces + mocks
   sim/     # the deterministic race engine (no DOM, no React)
   track/   # track building: routing, resampling, curvature, gradient, surface
+  worker/  # hosts the sim in a Web Worker; playback, seeking, wire protocol
+  ui/      # React race view: map, timing tower, event feed, controls
 apps/
+  web/     # Vite app shell
   cli/     # headless race runner
 ```
 
-Dependency direction is strictly `track -> sim -> core`. Never the reverse.
+Dependency direction is strictly `ui -> worker -> track -> sim -> core`. Never
+the reverse.
+
+The worker is its own package rather than living in `sim`: the worker entry
+needs `self` and `postMessage`, and `packages/sim` importing either would break
+the guarantee that it is provably headless.

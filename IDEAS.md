@@ -67,6 +67,26 @@ CLAUDE.md asks for this in the builder; it needs a real router to be worth
 writing, since the shape of the problem depends entirely on how Valhalla
 reports direction failures.
 
+**Auto-follow camera modes.** The race view deliberately fits the whole track
+and then leaves the camera alone. Two modes were considered and parked: follow
+the leader (dramatic, but you lose the race behind, which is usually where the
+action is) and follow the closest battle (genuinely exciting, but jumps around
+and would need tuning not to feel seasick). The frame buffer and interpolation
+already give a smooth position for any racer, so either is mostly a camera
+easing problem.
+
+**Vehicle silhouettes on the map.** Markers are currently colour + ring pattern
++ number. Rotating a per-category SVG to the node bearing would instantly
+communicate what kind of race it is; the bearing is already computed and carried
+on every marker feature. The reason it was not built is legibility at forty
+racers and low zoom — the natural version is a hybrid that swaps to silhouettes
+past a zoom threshold, which is two render paths to keep consistent.
+
+**A live debug panel.** Every step of the tick is already individually
+switchable and the toggles are plumbed through the worker protocol; nothing
+exposes them in the UI. Being able to re-run the same seed with drafting off
+and watch the difference would make tuning dramatically faster.
+
 **Weather as a race-setup preset** ("a wet evening", "a summer heatwave") rather
 than six numeric fields. The `WeatherSpec` manual variant already supports it.
 
