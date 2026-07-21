@@ -4,8 +4,9 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@anywhererace/web", "dev", "--", "--port", "5173"],
-      "port": 5173
+      "runtimeArgs": ["--filter", "@anywhererace/web", "dev"],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }
