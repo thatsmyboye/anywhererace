@@ -484,6 +484,18 @@ These are unresolved. Ask before assuming:
 
 ### Resolved
 
+- **Results design.** A dismissable panel over the finished race rather than a
+  separate screen, so the scrubber survives underneath and a chart can send you
+  back to the lap it describes. Order is classification, then the generated
+  report, then position-by-lap and lap-time charts, sector bests and the
+  incident timeline. The narrative is assembled from the event log by template,
+  never by a model — a shared race has to read identically for everyone, which
+  rules out anything non-deterministic.
+- **Finished races are stored as inputs, not recordings.** A saved race keeps
+  its track id, config, seed, `simVersion` and `resultHash`; reopening it
+  re-runs the simulation. That is the same contract `SharedRace` needs, and it
+  means a stored race can never drift out of step with the physics — a
+  mismatched hash is shown to the user rather than papered over.
 - **Race setup design.** One scrolling page rather than a wizard, because the
   settings interact — the routing profile filters the vehicle list, vehicle and
   laps decide the race duration and therefore how much forecast to fetch, and

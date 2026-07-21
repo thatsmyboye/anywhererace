@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Track } from '@anywhererace/core';
 import { hasBasemapKey } from '@anywhererace/core';
 import type { RaceConfig } from '@anywhererace/sim';
-import { getVehicleClass } from '@anywhererace/sim';
+import { getVehicleClass, isRetirement } from '@anywhererace/sim';
+import type { RaceResult } from '@anywhererace/sim';
 import { createTrackStore } from '@anywhererace/store';
-import type { RosterPresetSummary, TrackSummary } from '@anywhererace/store';
+import type { RosterPresetSummary, StoredRaceSummary, TrackSummary } from '@anywhererace/store';
 import { RaceSetup, RaceView, TrackBuilder, TrackList } from '@anywhererace/ui';
 import { createProviders, describeDegraded } from './providers';
 import type { DegradedState } from './providers';
@@ -22,7 +23,13 @@ type View =
   | { name: 'list' }
   | { name: 'builder' }
   | { name: 'setup'; track: Track }
-  | { name: 'race'; track: Track; config: RaceConfig };
+  | {
+      name: 'race';
+      track: Track;
+      config: RaceConfig;
+      /** Set when replaying a saved race, so the replay can be checked. */
+      savedAs?: { resultHash: string; simVersion: string };
+    };
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
 
@@ -37,12 +44,17 @@ export const App = () => {
   const [view, setView] = useState<View>({ name: 'list' });
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [presets, setPresets] = useState<RosterPresetSummary[]>([]);
+  const [races, setRaces] = useState<StoredRaceSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeError, setStoreError] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const [result, presetResult] = await Promise.all([store.list(), store.listRosterPresets()]);
+    const [result, presetResult, raceResult] = await Promise.all([
+      store.list(),
+      store.listRosterPresets(),
+      store.listRaces(),
+    ]);
     if (result.ok) {
       setTracks(result.value);
       setStoreError(undefined);
@@ -50,6 +62,7 @@ export const App = () => {
       setStoreError(result.error.message);
     }
     if (presetResult.ok) setPresets(presetResult.value);
+    if (raceResult.ok) setRaces(raceResult.value);
     setLoading(false);
   }, [store]);
 
@@ -120,6 +133,80 @@ export const App = () => {
     [store, providers, refresh],
   );
 
+  /**
+   * Save a finished race as its *inputs*.
+   *
+   * The sim is deterministic, so the seed and config are the race; storing the
+   * finishing order too would duplicate something already determined and would
+   * rot the moment the physics changed. The hash and sim version are kept so a
+   * replay can be checked against what it was saved with.
+   */
+  const saveRace = useCallback(
+    async (track: Track, config: RaceConfig, result: RaceResult) => {
+      const winner = result.finishers[0];
+      const runnerUp = result.finishers[1];
+      const vehicle = getVehicleClass(config.vehicleClassId);
+
+      const saved = await store.saveRace({
+        id: `race-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        trackId: track.id,
+        createdAt: new Date().toISOString(),
+        config,
+        simVersion: result.simVersion,
+        resultHash: result.resultHash,
+        summary: {
+          trackName: track.name,
+          vehicleLabel: vehicle?.label ?? config.vehicleClassId,
+          laps: config.laps,
+          fieldSize: config.racers.length,
+          winnerName:
+            config.racers.find((racer) => racer.id === winner?.racerId)?.name ?? 'Nobody',
+          ...(runnerUp?.gapToWinnerS === undefined ? {} : { marginS: runnerUp.gapToWinnerS }),
+          retirements: result.finishers.filter((f) => isRetirement(f.status)).length,
+        },
+      });
+      if (!saved.ok) setStoreError(saved.error.message);
+      return saved.ok;
+    },
+    [store],
+  );
+
+  /**
+   * Reopen a saved race by re-running it. The stored hash is handed to the race
+   * view so a replay that no longer matches can say so.
+   */
+  const replayRace = useCallback(
+    async (raceId: string) => {
+      const race = await store.getRace(raceId);
+      if (!race.ok) {
+        setStoreError(race.error.message);
+        return;
+      }
+      const track = await store.get(race.value.trackId);
+      if (!track.ok) {
+        setStoreError(
+          'The track this race was run on has been deleted, so it cannot be replayed.',
+        );
+        return;
+      }
+      setView({
+        name: 'race',
+        track: track.value.track,
+        config: race.value.config,
+        savedAs: { resultHash: race.value.resultHash, simVersion: race.value.simVersion },
+      });
+    },
+    [store],
+  );
+
+  const deleteRace = useCallback(
+    async (raceId: string) => {
+      await store.removeRace(raceId);
+      await refresh();
+    },
+    [store, refresh],
+  );
+
   const deleteTrack = useCallback(
     async (id: string) => {
       await store.remove(id);
@@ -173,6 +260,11 @@ export const App = () => {
           createWorker={createSimWorker}
           styleUrl={styleUrl}
           attribution={providers.tiles.attribution}
+          trackName={view.track.name}
+          savedAs={view.savedAs}
+          resultActions={(result) => (
+            <SaveRaceButton onSave={() => saveRace(view.track, view.config, result)} />
+          )}
           header={
             <header className="rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
               <div className="flex items-baseline justify-between gap-3">
@@ -200,13 +292,39 @@ export const App = () => {
     <div className="h-dvh w-screen overflow-hidden bg-[#0b0e13]">
       <TrackList
         tracks={tracks}
+        races={races}
         loading={loading}
         error={storeError}
         onCreate={() => setView({ name: 'builder' })}
         onRace={(id) => void openSetup(id)}
         onDelete={(id) => void deleteTrack(id)}
+        onReplay={(id) => void replayRace(id)}
+        onDeleteRace={(id) => void deleteRace(id)}
       />
     </div>
+  );
+};
+
+/**
+ * Saving is explicit rather than automatic. Most races are watched once and
+ * forgotten, and silently filling a user's storage with every race they
+ * happened to run is not a favour.
+ */
+const SaveRaceButton = ({ onSave }: { onSave: () => Promise<boolean> }) => {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  return (
+    <button
+      type="button"
+      disabled={state !== 'idle'}
+      onClick={() => {
+        setState('saving');
+        void onSave().then((ok) => setState(ok ? 'saved' : 'idle'));
+      }}
+      className="rounded border border-[#2b3543] bg-[#1f2632] px-3 py-1.5 text-sm text-[#e6ebf2] transition-colors hover:bg-[#2b3543] disabled:opacity-60"
+    >
+      {state === 'saved' ? 'Saved' : state === 'saving' ? 'Saving…' : 'Save race'}
+    </button>
   );
 };
 

@@ -1,4 +1,4 @@
-import type { TrackSummary } from '@anywhererace/store';
+import type { StoredRaceSummary, TrackSummary } from '@anywhererace/store';
 
 /**
  * Saved tracks.
@@ -12,20 +12,26 @@ import type { TrackSummary } from '@anywhererace/store';
 
 export type TrackListProps = {
   tracks: readonly TrackSummary[];
+  races: readonly StoredRaceSummary[];
   loading: boolean;
   error?: string | undefined;
   onCreate: () => void;
   onRace: (id: string) => void;
   onDelete: (id: string) => void;
+  onReplay: (raceId: string) => void;
+  onDeleteRace: (raceId: string) => void;
 };
 
 export const TrackList = ({
   tracks,
+  races,
   loading,
   error,
   onCreate,
   onRace,
   onDelete,
+  onReplay,
+  onDeleteRace,
 }: TrackListProps) => (
   <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-8 text-[#e6ebf2]">
     <header className="flex items-baseline justify-between">
@@ -98,6 +104,59 @@ export const TrackList = ({
           </li>
         ))}
       </ul>
+    )}
+
+    {races.length === 0 ? null : (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#8d9bb0]">
+          Saved races
+        </h2>
+        <p className="text-xs text-[#8d9bb0]">
+          Stored as their inputs, not as recordings — reopening one re-runs it from its seed.
+        </p>
+        <ul className="flex flex-col gap-2">
+          {races.map((race) => (
+            <li
+              key={race.id}
+              className="flex items-center gap-3 rounded-lg border border-[#2b3543] bg-[#161b24] px-4 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate font-medium">
+                  {race.summary.winnerName}
+                  <span className="ml-2 text-xs font-normal text-[#8d9bb0]">
+                    won at {race.summary.trackName}
+                  </span>
+                </h3>
+                <p className="text-xs tabular-nums text-[#8d9bb0]">
+                  {race.summary.vehicleLabel} · {race.summary.laps} laps ·{' '}
+                  {race.summary.fieldSize} racers
+                  {race.summary.marginS === undefined
+                    ? ''
+                    : ` · by ${race.summary.marginS.toFixed(2)}s`}
+                  {race.summary.retirements === 0 ? '' : ` · ${race.summary.retirements} DNF`}
+                  {' · '}
+                  {formatDate(race.createdAt)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onReplay(race.id)}
+                className="shrink-0 rounded bg-[#1f2632] px-3 py-1.5 text-sm transition-colors hover:bg-[#2b3543]"
+              >
+                Replay
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteRace(race.id)}
+                className="shrink-0 rounded px-2 py-1.5 text-sm text-[#8d9bb0] transition-colors hover:bg-[#2b3543] hover:text-[#ff5c5c]"
+                aria-label={`Delete saved race won by ${race.summary.winnerName}`}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     )}
   </div>
 );

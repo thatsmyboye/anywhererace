@@ -111,6 +111,19 @@ colours nobody can tell apart.
 you navigate away. Persisting a race config is a prerequisite for sharing
 anyway, since a shared link *is* a serialised config.
 
-**Commentary generation from the event log.** The log is typed and complete
-enough to drive this today — overtakes carry both racer ids and the position
-fought over, mistakes carry cause and cost, laps carry personal and race bests.
+**Live commentary during a race**, as opposed to the report afterwards. The
+narrative generator already turns events into sentences; the missing piece is
+choosing which of them are worth saying *now* rather than in summary.
+
+**Click a chart to scrub there.** The results panel sits over the finished race
+precisely so the scrubber survives underneath — clicking lap 7 on the position
+chart and having the race jump to it is the obvious next step, and needs only a
+callback from the chart to the existing seek.
+
+**Add the lap number to overtake events.** The narrative currently times its
+decisive moment in minutes because overtakes carry distance and tick but not
+lap. It is a one-field change to the event and would read far better.
+
+**A "why did they lose" explainer**, now more tractable than when first noted:
+the results page already computes places gained, incident costs and sector
+deltas, so attributing a lost race to a specific spin is mostly presentation.

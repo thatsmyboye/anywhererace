@@ -25,3 +25,6 @@ export { RaceSetup } from './components/setup/RaceSetup';
 export type { RaceSetupProps } from './components/setup/RaceSetup';
 export { RosterTable } from './components/setup/RosterTable';
 export { WeatherPicker } from './components/setup/WeatherPicker';
+export { ResultsPanel } from './components/results/ResultsPanel';
+export type { ResultsPanelProps } from './components/results/ResultsPanel';
+export { LapTimes, PositionOverTime } from './components/results/RaceCharts';

@@ -63,6 +63,13 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
   const [racers, setRacers] = useState<RacerView[]>([]);
   const [snapshot, setSnapshot] = useState<RaceSnapshot | undefined>(undefined);
   const [feed, setFeed] = useState<RaceEvent[]>([]);
+  /**
+   * The complete log, kept separately from the capped feed because the results
+   * page derives everything from it — charts, sector bests, the narrative.
+   * A fifty-lap, forty-car race produces on the order of ten thousand events,
+   * which is a few hundred kilobytes and well worth holding onto.
+   */
+  const [events, setEvents] = useState<RaceEvent[]>([]);
   const [result, setResult] = useState<RaceResult | undefined>(undefined);
   const [recordedTicks, setRecordedTicks] = useState<number[]>([]);
   const [error, setError] = useState<ErrorMessage['error'] | undefined>(undefined);
@@ -102,7 +109,7 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
           );
           setStatus('ready');
         },
-        onFrame: (next, events, frameProgress) => {
+        onFrame: (next, newEvents, frameProgress) => {
           if (disposed) return;
           const buffer = frameRef.current;
           const now = performance.now();
@@ -118,8 +125,9 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
 
           setSnapshot(next);
           setProgress(frameProgress);
-          if (events.length > 0) {
-            setFeed((current) => [...events, ...current].slice(0, eventFeedLength));
+          if (newEvents.length > 0) {
+            setEvents((current) => [...current, ...newEvents]);
+            setFeed((current) => [...newEvents, ...current].slice(0, eventFeedLength));
           }
           setStatus((current) => (current === 'finished' ? current : 'running'));
         },
@@ -187,6 +195,7 @@ export const useRaceClient = (options: UseRaceClientOptions) => {
     snapshot,
     frameRef,
     feed,
+    events,
     result,
     recordedTicks,
     speed,
