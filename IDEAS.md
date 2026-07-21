@@ -98,7 +98,18 @@ exposes them in the UI. Being able to re-run the same seed with drafting off
 and watch the difference would make tuning dramatically faster.
 
 **Weather as a race-setup preset** ("a wet evening", "a summer heatwave") rather
-than six numeric fields. The `WeatherSpec` manual variant already supports it.
+than four sliders. The `WeatherSpec` manual variant already supports it, and it
+would also be the natural place to expose cloud and humidity, which the sliders
+currently leave at their defaults.
+
+**Reorderable palette slots.** Roster colours are assigned by position, which
+guarantees the colourblind-safe spacing but gives the user no say. Letting them
+swap two racers' slots would offer control without letting anyone pick two
+colours nobody can tell apart.
+
+**Save a configured race, not just a track.** Setup currently exists only until
+you navigate away. Persisting a race config is a prerequisite for sharing
+anyway, since a shared link *is* a serialised config.
 
 **Commentary generation from the event log.** The log is typed and complete
 enough to drive this today — overtakes carry both racer ids and the position

@@ -1,4 +1,5 @@
 import type { Track } from '@anywhererace/core';
+import type { RacerSpec } from '@anywhererace/sim';
 
 /**
  * What is stored locally, and what deliberately is not.
@@ -14,7 +15,7 @@ import type { Track } from '@anywhererace/core';
  */
 
 /** Bumped whenever the stored shape changes. Dexie migrates on open. */
-export const STORE_VERSION = 1;
+export const STORE_VERSION = 2;
 
 export type StoredTrack = {
   /** Primary key. Same id the `Track` carries. */
@@ -92,3 +93,41 @@ export const normalizeDegraded = (value: DegradedSources | boolean | undefined):
   if (typeof value === 'boolean') return { routing: value, elevation: value };
   return { routing: value?.routing ?? false, elevation: value?.elevation ?? false };
 };
+
+/**
+ * A saved roster: a named list of name / colour / personality / skill rows.
+ *
+ * This is a **template**, not an entity. Nothing about a race ever writes back
+ * into it — no results, no form, no rating, no record of having been used.
+ * CLAUDE.md rules persistent racer careers out rather than deferring them, and
+ * the absence of any result field here is that rule made structural: there is
+ * nowhere for a career to accumulate even if someone later tried.
+ */
+export type StoredRosterPreset = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Grid slots are deliberately dropped; they belong to a race, not a roster. */
+  racers: RosterRow[];
+};
+
+/** Exactly the columns CLAUDE.md specifies for a roster row. */
+export type RosterRow = Pick<RacerSpec, 'name' | 'color' | 'skill'> & {
+  /** Archetype id. Inline custom personalities are not stored yet. */
+  personality: string;
+};
+
+export type RosterPresetSummary = {
+  id: string;
+  name: string;
+  updatedAt: string;
+  racerCount: number;
+};
+
+export const toPresetSummary = (preset: StoredRosterPreset): RosterPresetSummary => ({
+  id: preset.id,
+  name: preset.name,
+  updatedAt: preset.updatedAt,
+  racerCount: preset.racers.length,
+});

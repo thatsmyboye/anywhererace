@@ -2,12 +2,20 @@ import {
   createMapTilerProvider,
   createMockElevationProvider,
   createMockRoutingProvider,
+  createMockWeatherProvider,
+  createOpenMeteoProvider,
   createOpenTopoDataProvider,
   createValhallaProvider,
   withElevationFallback,
   withRoutingFallback,
+  withWeatherFallback,
 } from '@anywhererace/core';
-import type { ElevationProvider, RoutingProvider, TileProvider } from '@anywhererace/core';
+import type {
+  ElevationProvider,
+  RoutingProvider,
+  TileProvider,
+  WeatherProvider,
+} from '@anywhererace/core';
 
 /**
  * Wiring the real services, with the mocks behind them.
@@ -22,11 +30,13 @@ export type DegradedState = {
   /** Which services are currently falling back. */
   routing: boolean;
   elevation: boolean;
+  weather: boolean;
 };
 
 export type AppProviders = {
   routing: RoutingProvider;
   elevation: ElevationProvider;
+  weather: WeatherProvider;
   tiles: TileProvider;
   /** Snapshot of what has fallen back so far. */
   degraded: () => DegradedState;
@@ -46,7 +56,7 @@ export type CreateProvidersOptions = {
 };
 
 export const createProviders = (options: CreateProvidersOptions): AppProviders => {
-  const state: DegradedState = { routing: false, elevation: false };
+  const state: DegradedState = { routing: false, elevation: false, weather: false };
 
   const track = (service: keyof DegradedState) => (degraded: boolean): void => {
     if (state[service] === degraded) return;
@@ -55,6 +65,7 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
   };
   const onRoutingDegraded = track('routing');
   const onElevationDegraded = track('elevation');
+  const onWeatherDegraded = track('weather');
 
   const routing = withRoutingFallback(
     createValhallaProvider(),
@@ -69,9 +80,18 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
     { onDegraded: onElevationDegraded },
   );
 
+  const weather = withWeatherFallback(
+    createOpenMeteoProvider(),
+    // Dry and still: an invented storm would be a worse lie than an invented
+    // calm, because it would visibly change who wins.
+    createMockWeatherProvider({}),
+    { onDegraded: onWeatherDegraded },
+  );
+
   return {
     routing,
     elevation,
+    weather,
     tiles: createMapTilerProvider({ apiKey: options.maptilerKey }),
     degraded: () => ({ ...state }),
   };
@@ -92,6 +112,9 @@ export const describeDegraded = (
     notices.push(
       'The elevation service is unavailable, so gradients are synthetic. The track will still race, but its hills are invented.',
     );
+  }
+  if (state.weather) {
+    notices.push('The forecast is unavailable, so the weather has fallen back to dry and still.');
   }
   if (!hasBasemap) {
     notices.push(

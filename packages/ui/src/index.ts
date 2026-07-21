@@ -5,6 +5,8 @@ export * from './palette';
 export * from './markers';
 export * from './useRaceClient';
 export * from './useTrackBuilder';
+export * from './useRaceSetup';
+export * from './racerNames';
 
 export { RaceView } from './components/RaceView';
 export type { RaceViewProps } from './components/RaceView';
@@ -19,3 +21,7 @@ export { TrackBuilder } from './components/builder/TrackBuilder';
 export type { TrackBuilderProps } from './components/builder/TrackBuilder';
 export { BuilderMap } from './components/builder/BuilderMap';
 export { ElevationProfile } from './components/builder/ElevationProfile';
+export { RaceSetup } from './components/setup/RaceSetup';
+export type { RaceSetupProps } from './components/setup/RaceSetup';
+export { RosterTable } from './components/setup/RosterTable';
+export { WeatherPicker } from './components/setup/WeatherPicker';

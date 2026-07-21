@@ -178,3 +178,80 @@ describe('storage availability', () => {
     expect(isStorageAvailable(new IDBFactory())).toBe(true);
   });
 });
+
+describe('roster presets', () => {
+  const roster = [
+    { name: 'Ada', color: '#ff0000', personality: 'charger', skill: 0.8 },
+    { name: 'Bram', color: '#00ff00', personality: 'metronome', skill: 0.6 },
+  ];
+
+  it('round-trips a named roster', async () => {
+    await store.saveRosterPreset({ id: 'p1', name: 'Regulars', racers: roster });
+    const loaded = await store.getRosterPreset('p1');
+
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.value.name).toBe('Regulars');
+    expect(loaded.value.racers).toEqual(roster);
+  });
+
+  it('stores only the roster columns, never race state', async () => {
+    // A preset is a template. CLAUDE.md rules persistent racer careers out
+    // rather than deferring them, so there must be nowhere for race state to
+    // accumulate — not even a grid slot carried in by accident.
+    await store.saveRosterPreset({
+      id: 'p1',
+      name: 'Regulars',
+      racers: [{ ...roster[0], id: 'r01', gridSlot: 3 } as never],
+    });
+    const loaded = await store.getRosterPreset('p1');
+    if (!loaded.ok) throw new Error('expected a preset');
+
+    expect(Object.keys(loaded.value.racers[0] ?? {}).sort()).toEqual([
+      'color',
+      'name',
+      'personality',
+      'skill',
+    ]);
+  });
+
+  it('lists presets most recently edited first', async () => {
+    await store.saveRosterPreset({ id: 'a', name: 'Old', racers: roster, now: '2026-01-01T00:00:00Z' });
+    await store.saveRosterPreset({ id: 'b', name: 'New', racers: roster, now: '2026-07-01T00:00:00Z' });
+
+    const list = await store.listRosterPresets();
+    if (!list.ok) throw new Error('expected a list');
+    expect(list.value.map((entry) => entry.name)).toEqual(['New', 'Old']);
+    expect(list.value[0]?.racerCount).toBe(2);
+  });
+
+  it('keeps the original creation date when overwriting', async () => {
+    await store.saveRosterPreset({ id: 'p1', name: 'A', racers: roster, now: '2026-01-01T00:00:00Z' });
+    const again = await store.saveRosterPreset({
+      id: 'p1',
+      name: 'B',
+      racers: roster,
+      now: '2026-07-01T00:00:00Z',
+    });
+    if (!again.ok) throw new Error('expected a preset');
+    expect(again.value.createdAt).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('reports a missing preset and deletes cleanly', async () => {
+    expect((await store.getRosterPreset('nope')).ok).toBe(false);
+    await store.saveRosterPreset({ id: 'p1', name: 'A', racers: roster });
+    expect((await store.removeRosterPreset('p1')).ok).toBe(true);
+    expect((await store.getRosterPreset('p1')).ok).toBe(false);
+  });
+
+  it('keeps tracks and presets in separate tables', async () => {
+    await store.save({ track: track('t1'), builtWith });
+    await store.saveRosterPreset({ id: 'p1', name: 'Regulars', racers: roster });
+
+    const tracks = await store.list();
+    const presets = await store.listRosterPresets();
+    if (!tracks.ok || !presets.ok) throw new Error('expected both lists');
+    expect(tracks.value).toHaveLength(1);
+    expect(presets.value).toHaveLength(1);
+  });
+});

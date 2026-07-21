@@ -9,9 +9,8 @@ guess rather than a decision.
 
 ## Status
 
-You can draw a track on real streets, save it, and race it. The simulation, the
-track baker, the Web Worker host, the race view and the track builder are built
-and tested; race setup and the results page are not.
+You can draw a track on real streets, save it, configure a race on it, and watch
+it. Everything except the results page and sharing is built and tested.
 
 | Package | State |
 |---|---|
@@ -20,12 +19,11 @@ and tested; race setup and the results page are not.
 | `packages/track` | Routing, resampling, curvature, gradient, surface, junctions, render geometry |
 | `packages/worker` | Hosts the sim in a Web Worker: playback, fast-forward, seeking |
 | `packages/store` | Local-first persistence on IndexedDB |
-| `packages/ui` | Race view and track builder |
-| `apps/web` | Vite app shell — track list, builder, race view |
+| `packages/ui` | Race view, track builder, race setup |
+| `apps/web` | Vite app shell — track list, builder, setup, race view |
 | `apps/cli` | Headless race runner, for tuning |
 
-Not built: race setup (vehicle, laps, weather, roster), the results page, and
-sharing.
+Not built: the results page (lap chart, position chart, narrative) and sharing.
 
 Every external service is behind an interface with a mock implementation, and
 each falls back independently at runtime. The tests never touch the network, and
@@ -36,7 +34,7 @@ the app runs with no API keys at all.
 ```bash
 pnpm install
 pnpm dev           # http://localhost:5173
-pnpm test          # 219 tests
+pnpm test          # 236 tests
 pnpm typecheck
 pnpm lint
 ```
@@ -69,9 +67,23 @@ quietly at save time.
 Saving bakes the track at 5m resolution with real gradients and stores it in
 IndexedDB, so it survives a reload and races offline.
 
+## Setting up a race
+
+**Race it** on a saved track opens setup: vehicle class (filtered to those the
+track's routing profile allows), laps, field size, grid order, and the seed.
+
+Weather is either a real [Open-Meteo](https://open-meteo.com/) forecast — for
+now, or for a scheduled future start — or set by hand. Either way it is **baked
+into the race config at creation and never fetched again**, so a saved race
+replays in the weather it was actually run in.
+
+The roster table edits each racer's name, personality and skill, with a
+randomise button and named presets you can save and reload. A preset is a
+template: nothing about a race ever writes back into it.
+
 ## Watching a race
 
-The race view opens from **Race it** on any saved track: a map with the field on it, a
+The race view opens from **Start race**: a map with the field on it, a
 live timing tower, an event feed, and pause / 1x / 2x / 8x / skip-to-end. Once a
 race finishes, a scrubber appears.
 
@@ -133,7 +145,7 @@ packages/
   track/   # track building: routing, resampling, curvature, gradient, surface
   worker/  # hosts the sim in a Web Worker; playback, seeking, wire protocol
   store/   # local-first persistence on IndexedDB
-  ui/      # React: race view and track builder
+  ui/      # React: race view, track builder, race setup
 apps/
   web/     # Vite app shell
   cli/     # headless race runner

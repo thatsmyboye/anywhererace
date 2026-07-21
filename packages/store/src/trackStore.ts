@@ -3,8 +3,14 @@ import type { EntityTable } from 'dexie';
 import type { Track } from '@anywhererace/core';
 import { err, ok } from '@anywhererace/core';
 import type { Result } from '@anywhererace/core';
-import type { StoredTrack, TrackSummary } from './schema';
-import { STORE_VERSION, toSummary } from './schema';
+import type {
+  RosterPresetSummary,
+  RosterRow,
+  StoredRosterPreset,
+  StoredTrack,
+  TrackSummary,
+} from './schema';
+import { STORE_VERSION, toPresetSummary, toSummary } from './schema';
 
 /**
  * Local-first track storage on IndexedDB.
@@ -41,11 +47,25 @@ export interface TrackStore {
   list(): Promise<Result<TrackSummary[], StoreError>>;
   remove(id: string): Promise<Result<void, StoreError>>;
   rename(id: string, name: string): Promise<Result<StoredTrack, StoreError>>;
+
+  saveRosterPreset(input: SaveRosterPresetInput): Promise<Result<StoredRosterPreset, StoreError>>;
+  listRosterPresets(): Promise<Result<RosterPresetSummary[], StoreError>>;
+  getRosterPreset(id: string): Promise<Result<StoredRosterPreset, StoreError>>;
+  removeRosterPreset(id: string): Promise<Result<void, StoreError>>;
+
   close(): void;
 }
 
+export type SaveRosterPresetInput = {
+  id: string;
+  name: string;
+  racers: readonly RosterRow[];
+  now?: string;
+};
+
 type Schema = Dexie & {
   tracks: EntityTable<StoredTrack, 'id'>;
+  rosterPresets: EntityTable<StoredRosterPreset, 'id'>;
 };
 
 export type TrackStoreOptions = {
@@ -66,8 +86,10 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
 
   // Only indexed fields are listed; `track` and `builtWith` are stored but not
   // indexed, which is what Dexie's syntax means by omitting them.
+  // Dexie migrates forward on open; adding a table needs no data migration.
   db.version(STORE_VERSION).stores({
     tracks: 'id, name, updatedAt',
+    rosterPresets: 'id, name, updatedAt',
   });
 
   return {
@@ -138,6 +160,62 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
         };
         await db.tracks.put(updated);
         return ok(updated);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async saveRosterPreset(input) {
+      const timestamp = input.now ?? new Date().toISOString();
+      try {
+        const existing = await db.rosterPresets.get(input.id);
+        const record: StoredRosterPreset = {
+          id: input.id,
+          name: input.name,
+          createdAt: existing?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+          // Copied field by field rather than spread, so that a caller handing
+          // over a full RacerSpec cannot smuggle race-specific state — a grid
+          // slot, or anything a future change adds — into a reusable template.
+          racers: input.racers.map((racer) => ({
+            name: racer.name,
+            color: racer.color,
+            personality: racer.personality,
+            skill: racer.skill,
+          })),
+        };
+        await db.rosterPresets.put(record);
+        return ok(record);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async listRosterPresets() {
+      try {
+        const records = await db.rosterPresets.orderBy('updatedAt').reverse().toArray();
+        return ok(records.map(toPresetSummary));
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async getRosterPreset(id) {
+      try {
+        const record = await db.rosterPresets.get(id);
+        if (record === undefined) {
+          return err({ kind: 'not-found', message: `No saved roster with id "${id}".` });
+        }
+        return ok(record);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async removeRosterPreset(id) {
+      try {
+        await db.rosterPresets.delete(id);
+        return ok(undefined);
       } catch (error: unknown) {
         return err(toStoreError(error, 'write-failed'));
       }
