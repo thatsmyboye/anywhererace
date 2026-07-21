@@ -303,6 +303,79 @@ export const TUNING = {
     lateralReturnMs: 0.8,
   },
 
+  /**
+   * Reading the shape of the field: who is riding with whom.
+   *
+   * Observation only. Nothing here feeds back into a racer's speed, no roll is
+   * made against any of it, and switching it off would not change a single
+   * finishing time — which is why there is no debug toggle for it and why it
+   * cannot move the determinism goldens. See `groups.ts`.
+   */
+  groups: {
+    /**
+     * Time gap at which two racers stop counting as being in the same group.
+     *
+     * Expressed in seconds of road rather than meters because that is how a
+     * bike race is actually called ("the break is at eight seconds") and
+     * because it stays meaningful across classes: eight seconds is eight
+     * seconds whether the field is doing 40kph or 300.
+     *
+     * Set well above `draft.maxGapS` on purpose. Two seconds is the physical
+     * limit of the slipstream; a group is a looser thing than that, and a rider
+     * who has slipped to four seconds is off the wheel but has not yet been
+     * dropped.
+     */
+    splitGapS: 12,
+
+    /**
+     * Time gap at which two racers in *different* groups become one group
+     * again. Deliberately far tighter than `splitGapS`.
+     *
+     * This asymmetry is the single most important number here. With one
+     * threshold, a field whose natural spacing sits anywhere near it flaps
+     * across it forever: a rider at 12.1 seconds is a new group, at 11.9 they
+     * are back, and a five-hour race emits over a thousand "moves" that are
+     * really one rider holding station. Requiring them to actually close the
+     * gap to rejoin means a break has to be genuinely made *and* genuinely
+     * pulled back before either is reported. Measured on a 30-rider,
+     * five-hour bunch race, adding this cut group moves from ~1600 to a
+     * readable handful without losing a single real one.
+     *
+     * It is also what a commentator does. A gap is called once it opens and
+     * stays called until it is properly closed, not un-called every time it
+     * wobbles by a tenth.
+     */
+    mergeGapS: 5,
+
+    /**
+     * How often the field's shape is re-read, in seconds. There is no reason to
+     * do this at 20Hz: a group taking shape is a thing that happens over tens
+     * of seconds, and sampling at tick rate would only buy noise.
+     */
+    sampleIntervalS: 1,
+
+    /**
+     * Consecutive samples a new shape has to survive before it is believed.
+     *
+     * Hysteresis handles the flapping; this handles the transient. A rider
+     * gapped through one corner and back on the exit has not attacked, and
+     * twenty seconds is roughly when a commentator stops saying "he's got a
+     * small gap" and starts saying "he's gone".
+     */
+    confirmSamples: 20,
+
+    /**
+     * Grace period after the start before any of this is reported.
+     *
+     * The grid is laid out over `grid.slotSpacingM` and everyone accelerates
+     * from a standstill, so for the first seconds the field is arithmetically a
+     * dozen "groups" that are really one bunch that has not got going yet.
+     * Reporting the field coming together off the line as a series of catches
+     * would be describing the start as if it were a race move.
+     */
+    settleS: 20,
+  },
+
   incidents: {
     /**
      * Base per-tick mistake hazard at full effort, zero composure, dry. At

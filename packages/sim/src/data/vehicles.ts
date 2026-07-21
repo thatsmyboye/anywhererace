@@ -1,4 +1,10 @@
-import type { EnduranceModel, SurfaceType, VehicleCategory, VehicleClassId } from '@anywhererace/core';
+import type {
+  EnduranceModel,
+  RaceFormat,
+  SurfaceType,
+  VehicleCategory,
+  VehicleClassId,
+} from '@anywhererace/core';
 
 /**
  * Vehicle classes are data. The physics reads these numbers and contains no
@@ -24,6 +30,19 @@ export type VehicleClass = {
   id: VehicleClassId;
   label: string;
   category: VehicleCategory;
+
+  /**
+   * How a race of this class is narrated. Not physics — the tick is identical
+   * either way. `'cycling'` marks the classes that ride in a bunch, where
+   * reporting every individual pass would bury the race in noise.
+   *
+   * Deliberately its own field rather than derived from `category` or from
+   * `draftBenefit`. Category would sweep in the e-scooter, which shares
+   * `micromobility` but at `draftBenefit: 0.2` never forms a bunch to begin
+   * with; a `draftBenefit` threshold would sweep in the open-wheel racer at 0.9,
+   * which tows hard but races one car at a time.
+   */
+  raceFormat: RaceFormat;
 
   /** Flat, still-air, full-effort maximum. Race pace is a fraction of this. */
   topSpeedKph: number;
@@ -185,6 +204,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'runner',
     label: 'Runner',
     category: 'foot',
+    raceFormat: 'standard',
     topSpeedKph: 22,
     accelCurve: accelCurve(2.5, 22),
     brakingMs2: 4,
@@ -206,6 +226,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'road-cyclist',
     label: 'Road cyclist',
     category: 'micromobility',
+    raceFormat: 'cycling',
     topSpeedKph: 50,
     accelCurve: accelCurve(2.5, 50),
     brakingMs2: 5,
@@ -227,6 +248,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'e-scooter',
     label: 'E-scooter',
     category: 'micromobility',
+    raceFormat: 'standard',
     topSpeedKph: 25,
     accelCurve: accelCurve(1.5, 25),
     brakingMs2: 3.5,
@@ -248,6 +270,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'e-bike',
     label: 'E-bike',
     category: 'micromobility',
+    raceFormat: 'cycling',
     topSpeedKph: 32,
     accelCurve: accelCurve(2.0, 32),
     brakingMs2: 4.5,
@@ -267,6 +290,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'city-car',
     label: 'City car',
     category: 'road',
+    raceFormat: 'standard',
     topSpeedKph: 160,
     accelCurve: accelCurve(3.0, 160),
     brakingMs2: 8,
@@ -287,6 +311,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'hot-hatch',
     label: 'Hot hatch',
     category: 'road',
+    raceFormat: 'standard',
     topSpeedKph: 220,
     accelCurve: accelCurve(4.5, 220),
     brakingMs2: 9.5,
@@ -306,6 +331,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'sports-car',
     label: 'Sports car',
     category: 'performance',
+    raceFormat: 'standard',
     topSpeedKph: 260,
     accelCurve: accelCurve(6.0, 260),
     brakingMs2: 10.5,
@@ -325,6 +351,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'supercar',
     label: 'Supercar',
     category: 'performance',
+    raceFormat: 'standard',
     topSpeedKph: 320,
     accelCurve: accelCurve(9.0, 320),
     brakingMs2: 11.5,
@@ -344,6 +371,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'rally-car',
     label: 'Rally car',
     category: 'motorsport',
+    raceFormat: 'standard',
     topSpeedKph: 200,
     accelCurve: accelCurve(6.5, 200),
     brakingMs2: 9,
@@ -365,6 +393,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'gt-racer',
     label: 'GT racer',
     category: 'motorsport',
+    raceFormat: 'standard',
     topSpeedKph: 290,
     accelCurve: accelCurve(8.0, 290),
     brakingMs2: 15,
@@ -384,6 +413,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     id: 'open-wheel-racer',
     label: 'Open-wheel racer',
     category: 'motorsport',
+    raceFormat: 'standard',
     topSpeedKph: 330,
     accelCurve: accelCurve(12.0, 330),
     // Enormous braking is the point: this class should be won and lost under

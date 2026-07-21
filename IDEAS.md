@@ -20,6 +20,37 @@ simplifications, not oversights.
 
 ## Good v2 candidates
 
+**A peloton that actually behaves like one.** The *observational* half of this is
+built: `packages/sim/src/groups.ts` reads which racers are riding together and
+emits attacks, bridges, splits and catches, and the course sweep
+(`packages/track/src/separation.ts`) already marks the climbs, pinches and
+cobbled sectors where a field would plausibly come apart. Neither of them
+touches racer behavior, which is exactly why they could ship without moving a
+determinism golden.
+
+The missing half is the tick reading any of it. Today a racer only knows about
+the one racer directly ahead, so a bunch is an emergent traffic queue rather than
+a thing racers are *in*: nobody shelters in the middle of a group, nobody takes a
+turn on the front, and nobody gets dropped on a climb because the group's pace is
+above their own. What would need to change:
+
+- Drafting would have to become group-shaped rather than pairwise. A rider
+  twentieth in a bunch is sheltered by the whole bunch, not by the wheel in front.
+- A group needs a collective pace, and riders need to hold it above or below
+  their own sustainable effort — being in a group should cost you when it is
+  faster than you and save you when it is slower.
+- Racers would need to read `separationPoints` ahead of them, and personality
+  would decide who attacks on the climb and who sits in. `aggression`,
+  `ambition` and `pacing` are the natural hooks and already exist.
+- Echelons, for the `exposed` stretches. The wind model is directional per node
+  already, so the physics is there; what is missing is lateral group structure.
+
+This is a large change and it moves every result, so it wants its own branch,
+regenerated goldens, and a `SIM_VERSION` bump. Worth noting that the sanity
+table would need new rows: a bunch race that behaves like one should produce
+much tighter finishing times than the current model does.
+
+
 **Mixed vehicle classes in one race.** The sim is closer to this than it looks:
 `VehicleClass` is already per-racer data rather than per-race, and the tick
 reads it per racer. What would need work is the corner-speed and braking profile

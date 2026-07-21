@@ -41,8 +41,14 @@ Read these before writing any code. Violating them causes rework.
 
 6. **The race produces an event log, not just a result.** Every tick emits compact
    state; notable moments emit typed events (overtake, mistake, crash, DNF, lap, sector,
-   personal best). Replay = re-reading the log. This gives us commentary, timelines, and
-   shareable results for free.
+   personal best, group move). Replay = re-reading the log. This gives us commentary,
+   timelines, and shareable results for free.
+
+   The log is written whole and filtered at the edges. Nothing decides *not to record*
+   something because a particular screen would not show it — the results page, the
+   charts and the race report all read the full log, and a filter applied at write time
+   would be unrecoverable. Deciding what a viewer sees is the reader's job. See "Race
+   formats, and how a race is told".
 
 ---
 
@@ -115,6 +121,7 @@ type Track = {
   waypoints: LatLng[];          // user-editable source of truth
   polyline: LatLng[];           // snapped route from RoutingProvider
   nodes: TrackNode[];           // BAKED — regenerate whenever polyline changes
+  separationPoints?: SeparationPoint[];  // BAKED — see "Separation points"
   lengthMeters: number;
   startLine: number;            // distance along route
   finishLine: number;
@@ -142,6 +149,45 @@ then smooth with a rolling median to kill GPS noise spikes.
 
 Circuit tracks must close the loop; validate that the last waypoint routes back to the
 first and reject (with a clear UI message) if it can't.
+
+### Separation points
+
+When a course is created, a fast sweep runs over the baked nodes looking for stretches
+of road where a field could come apart — climbs, pinch points, technical sections, rough
+surfaces, and long exposed drags. It lives in `packages/track/src/separation.ts` and runs
+inside `bakeRoutedTrack`, which is the one place every course passes through.
+
+```ts
+type SeparationKind = 'climb' | 'narrows' | 'technical' | 'surface' | 'exposed';
+
+type SeparationPoint = {
+  startM: number;
+  endM: number;          // always > startM; may exceed lap length if it wraps the line
+  kind: SeparationKind;
+  severity: number;      // 0-1, for ranking within one course only
+  detail: string;        // one line of UI copy
+};
+```
+
+Four rules govern it:
+
+1. **It is an observation about the road, not a prediction about a race.** Nothing in
+   `packages/sim` reads it, no racer behaves differently because of it, and two races
+   over the same course will not necessarily split in the same places or at all. It sits
+   in the same family as corner count and total climb. The UI copy must not promise
+   otherwise.
+2. **The thresholds are calibrated for road cycling**, because that is the format the
+   question is asked about and because it is the strictest case — a bunch of cyclists
+   holds together through things that would already have strung out a field of cars.
+   All of them live in `SEPARATION` in `packages/track/src/constants.ts`.
+3. **It cannot see the weather.** The sweep runs when the course is saved, long before a
+   race bakes a forecast. The one kind that depends on conditions — `exposed`, meaning a
+   long constant-bearing stretch that would echelon in a crosswind — has a capped
+   severity and says "if there is a crosswind" in its own copy rather than pretending.
+4. **`undefined` and `[]` mean different things.** Absent means the course predates the
+   sweep; empty means it was analyzed and the road is flat, wide and smooth. Never
+   collapse the two — telling a user a course has no selection points when nobody ever
+   looked is a lie the UI can easily tell by accident.
 
 ### Routing profiles and legality
 
@@ -198,6 +244,7 @@ type VehicleClass = {
   id: string;
   label: string;
   category: 'foot' | 'micromobility' | 'road' | 'performance' | 'motorsport';
+  raceFormat: 'cycling' | 'standard';  // how a race of this class is *narrated*
   topSpeedKph: number;
   accelCurve: (speedKph: number) => number;   // m/s^2 available at speed
   brakingMs2: number;
@@ -215,6 +262,47 @@ Launch set: runner, road cyclist, e-scooter, e-bike, city car, hot hatch, sports
 supercar, rally car, GT racer, open-wheel racer. Aim for the *feel* to differ — an
 e-scooter race should be a slow grind where hills decide everything, an open-wheeler
 race should be won in the braking zones.
+
+### Race formats, and how a race is told
+
+`raceFormat` on a vehicle class decides how a race is *narrated*. It changes nothing
+about physics, incidents, or results — both formats run the identical tick, and
+switching a class between them would not move a single finishing time.
+
+What it changes is what reaches the viewer. A motor race is told pass by pass and every
+pass is worth showing. A bunch race is not: a 24-rider peloton produces around two
+thousand position changes in an hour, essentially all of them riders shuffling inside the
+same group. Broadcasting those is broadcasting noise, and it buries the twenty-odd
+moments that decide the race. So a cycling race is told in **groups** — who attacked, who
+bridged, what split, what came back together.
+
+`'cycling'` is set on `road-cyclist` and `e-bike`, and deliberately not derived from
+`category` or `draftBenefit`: category would sweep in the e-scooter, which shares
+`micromobility` but at `draftBenefit: 0.2` never forms a bunch; a `draftBenefit`
+threshold would sweep in the open-wheel racer, which tows hard but races one car at a
+time.
+
+**Groups are observation, not behavior.** `packages/sim/src/groups.ts` derives which
+racers are riding together, purely from distances and speeds. It never touches an `Rng`,
+nothing in the tick consults it, and deleting it would not change a result — which is
+also why it cannot move the determinism goldens. It produces two things:
+
+- `GroupEvent` — `attack`, `bridge`, `split`, `catch`, `dropped`, with the groups on
+  either side and the gap between them.
+- `significance` on every `OvertakeEvent` — `lead-change`, `between-groups`, or
+  `in-group`. Every pass is still logged; this only says which ones are worth saying.
+  Classified in the sim because only the sim knows the field's shape.
+
+Two mechanisms stop this generating noise, and both are load-bearing. **Hysteresis**: a
+group breaks at `splitGapS` but only re-forms at the much tighter `mergeGapS`. **Confirmation**:
+a new shape must survive `confirmSamples` consecutive one-second samples before it is
+believed. Without hysteresis in particular, a field whose natural spacing sits near the
+threshold flaps across it forever — measured on a 30-rider five-hour race, adding it took
+group moves from about 1600 to under 100 without losing a real one. If you are retuning
+this, `pnpm race` prints the broadcast counts; that is what it is for.
+
+The **behavioral** half — a field that actually splits on the climbs the course sweep
+found — is deliberately not built. See `IDEAS.md`.
 
 ### Personalities
 
@@ -343,6 +431,13 @@ sim rate.
 **Also always on screen:** a live timing tower (position, gap to leader, gap to car
 ahead, last lap), because for most of a race the map alone doesn't tell you who's
 winning.
+
+**The event feed is capped, so it must be filtered before it is capped.** The race client
+keeps only the last few dozen showable events, and the predicate deciding what is showable
+lives in `packages/ui/src/feed.ts` precisely so the client and the component share it. If
+the client capped the raw log and the component filtered afterwards, a bunch race would
+show an empty feed almost permanently — any recent forty events are overwhelmingly likely
+to be in-bunch shuffling with nothing worth showing among them.
 
 ---
 
@@ -484,6 +579,16 @@ These are unresolved. Ask before assuming:
 
 ### Resolved
 
+- **A bunch race is not narrated pass by pass.** Cycling formats suppress in-bunch
+  position changes in the live feed and report group moves instead. The format is
+  derived from the vehicle class rather than chosen at setup, because v1 runs one class
+  for the whole field so the class already settles it and a separate control could only
+  contradict it. The sim tags each pass with its significance rather than leaving the UI
+  to guess, because only the sim knows the shape of the field.
+- **The separation sweep is informational.** It runs at course creation and is stored on
+  the track; the simulation does not read it. Making a field actually split at those
+  points is a behavioral change to the tick and belongs on its own branch — see
+  `IDEAS.md`.
 - **Results design.** A dismissable panel over the finished race rather than a
   separate screen, so the scrubber survives underneath and a chart can send you
   back to the lap it describes. Order is classification, then the generated

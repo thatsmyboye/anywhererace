@@ -6,6 +6,7 @@ export * from './resample';
 export * from './curvature';
 export * from './surface';
 export * from './bake';
+export * from './separation';
 export * from './build';
 export * from './preview';
 export * from './position';

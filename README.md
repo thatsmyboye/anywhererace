@@ -66,7 +66,12 @@ drawn as a dashed red line and named in the waypoint list rather than failing
 quietly at save time.
 
 Saving bakes the track at 5m resolution with real gradients and stores it in
-IndexedDB, so it survives a reload and races offline.
+IndexedDB, so it survives a reload and races offline. It also sweeps the route
+for the places a field could come apart — climbs, pinch points, technical
+sections, cobbles, and long exposed drags — which race setup shows you when you
+pick a bunch-racing class. That is a read on the road, not a prediction: the
+simulation does not use it, and a race may split somewhere else or never split
+at all.
 
 ## Setting up a race
 
@@ -87,6 +92,13 @@ template: nothing about a race ever writes back into it.
 The race view opens from **Start race**: a map with the field on it, a
 live timing tower, an event feed, and pause / 1x / 2x / 8x / skip-to-end. Once a
 race finishes, a scrubber appears.
+
+The feed adapts to what kind of race it is. A car or foot race is reported pass
+by pass. A bike race is not — a 24-rider bunch generates around two thousand
+position changes an hour, essentially all of it riders shuffling inside the same
+group — so a cycling feed drops the shuffling and reports what a commentator
+would instead: who attacked, who bridged, what split, what got caught. Nothing
+is lost from the event log; the results page still sees every pass.
 
 The CLI is the other way in, and still the fastest way to judge a tuning change.
 It builds a track from the mock providers, runs a race, and prints the

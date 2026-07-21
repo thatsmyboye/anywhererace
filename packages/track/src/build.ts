@@ -14,6 +14,7 @@ import type {
 import { err, haversineMeters, ok } from '@anywhererace/core';
 import { bakeNodes, resampleForBake } from './bake';
 import { BAKE } from './constants';
+import { sweepForSeparation } from './separation';
 
 /**
  * Building a track: route each leg, pull elevation for the baked node
@@ -176,6 +177,16 @@ export const bakeRoutedTrack = async (
     waypoints: input.waypoints.slice(),
     polyline: routed.polyline,
     nodes: baked.nodes,
+    // Swept here rather than on demand because this is the one place every
+    // course passes through, and because the answer depends only on the baked
+    // nodes: sweeping later would either re-derive the same thing or risk
+    // answering for a route the track no longer has.
+    separationPoints: sweepForSeparation({
+      nodes: baked.nodes,
+      mode,
+      spacingM: baked.spacingM,
+      totalLengthM: baked.lengthMeters,
+    }),
     lengthMeters: baked.lengthMeters,
     startLine: 0,
     finishLine: baked.lengthMeters,
