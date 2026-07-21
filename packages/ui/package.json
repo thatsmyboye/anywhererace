@@ -10,7 +10,8 @@
     "@anywhererace/core": "workspace:*",
     "@anywhererace/sim": "workspace:*",
     "@anywhererace/track": "workspace:*",
-    "@anywhererace/worker": "workspace:*"
+    "@anywhererace/worker": "workspace:*",
+    "@anywhererace/store": "workspace:*"
   },
   "peerDependencies": {
     "maplibre-gl": "^5.0.0",

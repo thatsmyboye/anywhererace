@@ -48,4 +48,14 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Must come *after* the block above: flat config applies later entries over
+    // earlier ones. Provider adapters are I/O by definition — they talk to
+    // routing, elevation and weather services, and one of them needs a clock
+    // for its retry cool-off. They run at track-build time and are never
+    // reached from the simulation's tick, so the determinism ban does not
+    // apply to them.
+    files: ['packages/core/src/providers/**/*.ts'],
+    rules: { 'no-restricted-properties': 'off' },
+  },
 );

@@ -1,54 +1,14 @@
-import type { LatLng, Track } from '@anywhererace/core';
-import {
-  createMockElevationProvider,
-  createMockRoutingProvider,
-  destinationPoint,
-} from '@anywhererace/core';
+import type { Track } from '@anywhererace/core';
 import type { RaceConfig, RacerSpec } from '@anywhererace/sim';
 import { ARCHETYPES } from '@anywhererace/sim';
-import { buildTrack } from '@anywhererace/track';
 
 /**
- * A demo race, built from the mock providers.
+ * Default race settings for a saved track.
  *
- * There is no track builder yet, so this stands in for one. It is deliberately
- * built through the *real* pipeline — router, elevation lookup, baker — rather
- * than hand-assembled, so that the race view is exercising the same code path a
- * user-drawn track will.
- *
- * Everything here is a placeholder pending the track builder and race setup
- * screens.
+ * PLACEHOLDER: this stands in for the race setup screen. Everything here — the
+ * vehicle class, the lap count, the weather, the field — is a fixed default
+ * that the user has no way to change yet.
  */
-
-/** Central London, purely so the demo lands somewhere recognisable. */
-const ORIGIN: LatLng = { lat: 51.5072, lng: -0.1276 };
-const BLOCK_SIZE_M = 900;
-
-export const buildDemoTrack = async (): Promise<Track> => {
-  const east = destinationPoint(ORIGIN, 90, BLOCK_SIZE_M);
-  const waypoints: LatLng[] = [
-    ORIGIN,
-    east,
-    destinationPoint(east, 0, BLOCK_SIZE_M),
-    destinationPoint(ORIGIN, 0, BLOCK_SIZE_M),
-  ];
-
-  const built = await buildTrack({
-    id: 'demo-circuit',
-    name: 'Demo circuit',
-    mode: 'circuit',
-    routingProfile: 'motor',
-    waypoints,
-    routing: createMockRoutingProvider({ seed: 'demo-track' }),
-    elevation: createMockElevationProvider({ seed: 'demo-track', reliefM: 45 }),
-  });
-
-  if (!built.ok) {
-    // The app boundary is the one place an exception is appropriate.
-    throw new Error(`Could not build the demo track: ${built.error.message}`);
-  }
-  return built.value;
-};
 
 export const buildDemoConfig = (track: Track): RaceConfig => {
   const racers = demoField(12);

@@ -75,20 +75,25 @@ packages/
   sim/       # the deterministic race engine (no DOM, no React)
   track/     # track building: routing, resampling, curvature, gradient, surface
   worker/    # hosts the sim in a Web Worker; playback, seeking, the wire protocol
+  store/     # local-first persistence on IndexedDB (Dexie)
   ui/        # React app: editor, race view, results
 apps/
   web/       # Vite app shell
   cli/       # headless race runner, for tuning the sim without a UI
 ```
 
-Dependency direction is strictly `ui -> worker -> track -> sim -> core`. Never
-the reverse.
+Dependency direction is strictly `ui -> worker -> track -> sim -> core`, with
+`store` alongside `worker`. Never the reverse.
 
 `packages/worker` exists because the worker entry point needs `self` and
 `postMessage`, which `packages/sim` must never import — putting it there would
 break the rule that the sim is provably headless. Keeping it separate also
 means the playback engine (`RaceSession`) is unit-testable in Node against a
 fake clock, with the worker file itself reduced to a twenty-line adapter.
+
+`packages/store` is separate from `ui` because persistence is not a rendering
+concern, and keeping it apart lets it be tested against `fake-indexeddb` with no
+React involved.
 
 `apps/cli` exists because the simulation had to be watchable long before there
 was a map to watch it on. It is still the fastest way to judge a tuning change.
@@ -402,12 +407,25 @@ pnpm lint
 pnpm race            # headless race runner; --help for options
 ```
 
-### Basemap key
+### External services
 
-The map needs a MapTiler key, supplied as `VITE_MAPTILER_KEY` in
-`apps/web/.env.local` (gitignored; see `apps/web/.env.example`). Without one the
-app still runs, on a blank background, and says so. The key ships to the browser
-and so is public — restrict it by HTTP referrer in the MapTiler dashboard.
+All three are optional at runtime and each falls back independently:
+
+| Service | Used for | Without it |
+|---|---|---|
+| MapTiler (`VITE_MAPTILER_KEY`) | basemap | blank background, app still works |
+| Valhalla (FOSSGIS public) | snapping routes to real roads | synthetic geometry, flagged in the UI |
+| Open-Topo-Data | real gradients | synthetic hills, flagged in the UI |
+
+Only MapTiler needs a key: put it in `apps/web/.env.local` (gitignored; see
+`apps/web/.env.example`). It ships to the browser and so is public — restrict it
+by HTTP referrer in the MapTiler dashboard.
+
+**The fallback never covers up a real answer.** "No route exists between these
+two points" is the router doing its job — usually a one-way street — and it is
+shown to the user. Only an outage, a timeout or a rate limit degrades to the
+mock, and when it does, the track records which service was synthetic so the
+track list can say so.
 
 ---
 

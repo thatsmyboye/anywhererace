@@ -32,6 +32,8 @@
       "@anywhererace/track/*": ["packages/track/src/*"],
       "@anywhererace/worker": ["packages/worker/src/index.ts"],
       "@anywhererace/worker/*": ["packages/worker/src/*"],
+      "@anywhererace/store": ["packages/store/src/index.ts"],
+      "@anywhererace/store/*": ["packages/store/src/*"],
       "@anywhererace/ui": ["packages/ui/src/index.ts"],
       "@anywhererace/ui/*": ["packages/ui/src/*"]
     }

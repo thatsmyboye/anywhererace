@@ -16,6 +16,7 @@ export default defineConfig({
       '@anywhererace/sim': pkg('sim'),
       '@anywhererace/track': pkg('track'),
       '@anywhererace/worker': pkg('worker'),
+      '@anywhererace/store': pkg('store'),
       '@anywhererace/ui': pkg('ui'),
     },
   },
@@ -36,6 +37,10 @@ export default defineConfig({
       {
         extends: true,
         test: { name: 'worker', include: ['packages/worker/test/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        extends: true,
+        test: { name: 'store', include: ['packages/store/test/**/*.test.ts'], environment: 'node' },
       },
       {
         extends: true,
