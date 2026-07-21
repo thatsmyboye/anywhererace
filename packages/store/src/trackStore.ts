@@ -6,11 +6,13 @@ import type { Result } from '@anywhererace/core';
 import type {
   RosterPresetSummary,
   RosterRow,
+  StoredRace,
+  StoredRaceSummary,
   StoredRosterPreset,
   StoredTrack,
   TrackSummary,
 } from './schema';
-import { STORE_VERSION, toPresetSummary, toSummary } from './schema';
+import { STORE_VERSION, toPresetSummary, toRaceSummary, toSummary } from './schema';
 
 /**
  * Local-first track storage on IndexedDB.
@@ -53,6 +55,11 @@ export interface TrackStore {
   getRosterPreset(id: string): Promise<Result<StoredRosterPreset, StoreError>>;
   removeRosterPreset(id: string): Promise<Result<void, StoreError>>;
 
+  saveRace(race: StoredRace): Promise<Result<StoredRace, StoreError>>;
+  listRaces(trackId?: string): Promise<Result<StoredRaceSummary[], StoreError>>;
+  getRace(id: string): Promise<Result<StoredRace, StoreError>>;
+  removeRace(id: string): Promise<Result<void, StoreError>>;
+
   close(): void;
 }
 
@@ -66,6 +73,7 @@ export type SaveRosterPresetInput = {
 type Schema = Dexie & {
   tracks: EntityTable<StoredTrack, 'id'>;
   rosterPresets: EntityTable<StoredRosterPreset, 'id'>;
+  races: EntityTable<StoredRace, 'id'>;
 };
 
 export type TrackStoreOptions = {
@@ -90,6 +98,10 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
   db.version(STORE_VERSION).stores({
     tracks: 'id, name, updatedAt',
     rosterPresets: 'id, name, updatedAt',
+    // Indexed by track so a track's races can be listed, and by date for
+    // ordering. Nothing is indexed by racer: there is no per-racer history to
+    // query, by design.
+    races: 'id, trackId, createdAt',
   });
 
   return {
@@ -215,6 +227,48 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
     async removeRosterPreset(id) {
       try {
         await db.rosterPresets.delete(id);
+        return ok(undefined);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async saveRace(race) {
+      try {
+        await db.races.put(race);
+        return ok(race);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async listRaces(trackId) {
+      try {
+        const records =
+          trackId === undefined
+            ? await db.races.orderBy('createdAt').reverse().toArray()
+            : await db.races.where('trackId').equals(trackId).reverse().sortBy('createdAt');
+        return ok(records.map(toRaceSummary));
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async getRace(id) {
+      try {
+        const record = await db.races.get(id);
+        if (record === undefined) {
+          return err({ kind: 'not-found', message: `No saved race with id "${id}".` });
+        }
+        return ok(record);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async removeRace(id) {
+      try {
+        await db.races.delete(id);
         return ok(undefined);
       } catch (error: unknown) {
         return err(toStoreError(error, 'write-failed'));

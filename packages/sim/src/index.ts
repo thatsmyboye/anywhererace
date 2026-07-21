@@ -16,3 +16,5 @@ export * from './setup';
 export * from './profile';
 export * from './tick';
 export * from './race';
+export * from './results';
+export * from './narrative';

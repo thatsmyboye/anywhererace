@@ -9,8 +9,8 @@ guess rather than a decision.
 
 ## Status
 
-You can draw a track on real streets, save it, configure a race on it, and watch
-it. Everything except the results page and sharing is built and tested.
+You can draw a track on real streets, save it, configure a race on it, watch it,
+and read the results. Everything except sharing is built and tested.
 
 | Package | State |
 |---|---|
@@ -19,11 +19,12 @@ it. Everything except the results page and sharing is built and tested.
 | `packages/track` | Routing, resampling, curvature, gradient, surface, junctions, render geometry |
 | `packages/worker` | Hosts the sim in a Web Worker: playback, fast-forward, seeking |
 | `packages/store` | Local-first persistence on IndexedDB |
-| `packages/ui` | Race view, track builder, race setup |
-| `apps/web` | Vite app shell — track list, builder, setup, race view |
+| `packages/ui` | Race view, track builder, race setup, results |
+| `apps/web` | Vite app shell — tracks, saved races, builder, setup, race view |
 | `apps/cli` | Headless race runner, for tuning |
 
-Not built: the results page (lap chart, position chart, narrative) and sharing.
+Not built: sharing — the compressed URL payload, the `simVersion` mismatch
+banner for a *shared* race, and OG images.
 
 Every external service is behind an interface with a mock implementation, and
 each falls back independently at runtime. The tests never touch the network, and
@@ -34,7 +35,7 @@ the app runs with no API keys at all.
 ```bash
 pnpm install
 pnpm dev           # http://localhost:5173
-pnpm test          # 236 tests
+pnpm test          # 265 tests
 pnpm typecheck
 pnpm lint
 ```
@@ -113,6 +114,28 @@ The simulation worker is emitted as its own chunk, and MapLibre is split out
 separately so an app update does not force visitors to re-download the map
 engine.
 
+## Results
+
+When the flag falls, results open over the race: classification, a generated
+race report, position-by-lap and lap-time charts, sector bests with the ideal
+lap nobody drove, and the incident timeline. Dismiss it and the finished race is
+still there with its scrubber, so a chart can send you back to the lap it is
+describing.
+
+The report is assembled from the event log by template rather than written by a
+model. A shared race has to read identically for everyone, which rules out
+anything non-deterministic — and the log already carries the facts:
+
+> Wren Jarrow won at Bloomsbury loop by 0.87s from Indi Vance. Lux Kestrel led
+> away from pole; the winner started 11th. The lead changed 3 times; the one
+> that stuck came on the 8th minute, past Fen Ellery. Wren Jarrow climbed 10
+> places, 11th to 1st. Fastest lap went to Indi Vance, 2:05.96 on lap 4.
+
+**Save race** stores the race as its *inputs* — track id, config, seed,
+`simVersion`, `resultHash` — not as a recording. Replaying re-runs the
+simulation from the seed, and if the result no longer matches what it was saved
+with, it still plays and says so.
+
 ## The rules that matter
 
 Three properties are load-bearing, and breaking any of them is a rework, not a
@@ -145,7 +168,7 @@ packages/
   track/   # track building: routing, resampling, curvature, gradient, surface
   worker/  # hosts the sim in a Web Worker; playback, seeking, wire protocol
   store/   # local-first persistence on IndexedDB
-  ui/      # React: race view, track builder, race setup
+  ui/      # React: race view, track builder, race setup, results
 apps/
   web/     # Vite app shell
   cli/     # headless race runner

@@ -1,5 +1,5 @@
 import type { Track } from '@anywhererace/core';
-import type { RacerSpec } from '@anywhererace/sim';
+import type { RaceConfig, RacerSpec } from '@anywhererace/sim';
 
 /**
  * What is stored locally, and what deliberately is not.
@@ -15,7 +15,7 @@ import type { RacerSpec } from '@anywhererace/sim';
  */
 
 /** Bumped whenever the stored shape changes. Dexie migrates on open. */
-export const STORE_VERSION = 2;
+export const STORE_VERSION = 3;
 
 export type StoredTrack = {
   /** Primary key. Same id the `Track` carries. */
@@ -130,4 +130,53 @@ export const toPresetSummary = (preset: StoredRosterPreset): RosterPresetSummary
   name: preset.name,
   updatedAt: preset.updatedAt,
   racerCount: preset.racers.length,
+});
+
+/**
+ * A finished race, stored as its **inputs**.
+ *
+ * The simulation is deterministic, so the seed and config *are* the race —
+ * storing the finishing order as well would duplicate something already
+ * determined, and would rot the moment the sim changed underneath it. Opening a
+ * saved race re-runs it.
+ *
+ * `simVersion` and `resultHash` are what make that honest. Any change to the
+ * tick, the vehicle data or the tuning constants alters results; on reopening,
+ * the recomputed hash is compared against the stored one and a mismatch is
+ * shown to the user rather than papered over. This is the same contract
+ * `SharedRace` will need, which is why it is shaped this way now.
+ */
+export type StoredRace = {
+  id: string;
+  trackId: string;
+  createdAt: string;
+  config: RaceConfig;
+  simVersion: string;
+  /** Hash of the finishing order and times when this race was saved. */
+  resultHash: string;
+  /** Enough to list a race without re-simulating it. */
+  summary: RaceSummaryLine;
+};
+
+export type RaceSummaryLine = {
+  trackName: string;
+  vehicleLabel: string;
+  laps: number;
+  fieldSize: number;
+  winnerName: string;
+  /** Gap from the winner to second place. Undefined if nobody finished. */
+  marginS?: number;
+  retirements: number;
+};
+
+export type StoredRaceSummary = Pick<StoredRace, 'id' | 'trackId' | 'createdAt' | 'simVersion'> & {
+  summary: RaceSummaryLine;
+};
+
+export const toRaceSummary = (race: StoredRace): StoredRaceSummary => ({
+  id: race.id,
+  trackId: race.trackId,
+  createdAt: race.createdAt,
+  simVersion: race.simVersion,
+  summary: race.summary,
 });

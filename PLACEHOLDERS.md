@@ -442,10 +442,57 @@ Within them:
 
 ---
 
-## 21. Not built at all
+## 21. The results page
 
-- The results page — lap chart, position-over-time, sector bests, incident
-  timeline, generated narrative
+**Where:** `packages/sim/src/results.ts`, `packages/sim/src/narrative.ts`,
+`packages/ui/src/components/results/`
+
+The analysis and the narrative live in `packages/sim` rather than in the UI,
+because they are pure functions over the event log with no rendering in them —
+which also means they are tested against real races rather than fixtures.
+
+- **The narrative is templates, and the wording is mine.** Seven beats —
+  headline, start, decisive moment, biggest mover, costliest incident, fastest
+  lap, attrition — each dropped when it does not apply. The thresholds that
+  decide whether a beat fires are invented: a win under 0.5s is "a photo
+  finish", over 20s is "as they liked", a climb counts at 3 places, an incident
+  is notable at 3 seconds lost. **The tone is a judgment call and worth a
+  read.**
+- **"On the Nth minute"** is how the decisive moment is timed. Lap number would
+  be better, but overtake events carry distance and tick rather than lap.
+  Adding the lap to the event would be the right fix.
+- **Failed passes are counted, not listed.** A narrow track produces hundreds;
+  a timeline that is 90% "tried a move, did not get it" hides the handful of
+  moments that decided the race. The heading reports the count.
+- **Position-by-lap is built from lap crossings**, not from tick snapshots,
+  because a racer's position is only unambiguous at a timing line. It follows
+  that a point-to-point race has no position chart at all — there are no laps.
+  The chart hides itself rather than showing one meaningless column.
+- **Charts use Recharts, the elevation profile does not.** Per the stack table.
+  These need axes, gridlines and tooltips; the profile needs none of that.
+  Recharts is ~100KB gzipped, which is most of the app bundle's growth.
+- **No legend on the charts.** Lines use each racer's marker colour, so the
+  chart, tower and map agree. At forty racers a legend would be bigger than the
+  chart. This leans on the colour palette being distinguishable, which is
+  tested, but a hover is currently the only way to identify a line.
+
+## 22. Race storage gaps
+
+- **Saving is manual.** Most races are watched once; silently filling a user's
+  storage with every race they ran is not a favour. But it does mean a good
+  race is lost if you navigate away without pressing the button.
+- **A saved race pins nothing about the track.** It stores a track *id*, so
+  deleting the track makes its races unreplayable — handled with a message, but
+  a shared race will need the track embedded instead.
+- **The version-mismatch path is untested against a real mismatch.** The code
+  compares the recomputed hash to the stored one and shows a banner; I verified
+  the matching case (a replay reproduced its saved result exactly) but could not
+  produce a genuine mismatch without deliberately changing the physics.
+
+---
+
+## 23. Not built at all
+
 - `SharedRace`, the compressed URL payload, `simVersion` mismatch banner, OG
   images
 - Supabase, and any sync beyond this browser

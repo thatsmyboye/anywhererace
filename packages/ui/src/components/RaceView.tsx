@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import type { Track } from '@anywhererace/core';
-import type { DebugToggles, RaceConfig } from '@anywhererace/sim';
+import type { DebugToggles, RaceConfig, RaceResult } from '@anywhererace/sim';
 import { EventFeed } from './EventFeed';
 import { PlaybackControls } from './PlaybackControls';
 import { RaceMap } from './RaceMap';
 import { TimingTower } from './TimingTower';
+import { ResultsPanel } from './results/ResultsPanel';
 import { useRaceClient } from '../useRaceClient';
 
 /**
@@ -25,6 +27,16 @@ export type RaceViewProps = {
   attribution: string;
   /** Rendered above the timing tower — race name, vehicle class, weather. */
   header?: React.ReactNode;
+  /** Rendered in the results header, for saving or sharing the race. */
+  resultActions?: (result: RaceResult) => React.ReactNode;
+  /** Track name, shown in the results header and used in the narrative. */
+  trackName?: string;
+  /**
+   * Set when replaying a saved race. The replay is checked against what it was
+   * saved with, and any disagreement is shown rather than hidden — CLAUDE.md is
+   * explicit that a version mismatch still plays, but honestly.
+   */
+  savedAs?: { resultHash: string; simVersion: string } | undefined;
 };
 
 /** Ticks per simulated second. Mirrors SIM_HZ; the worker confirms it on ready. */
@@ -38,7 +50,14 @@ export const RaceView = ({
   styleUrl,
   attribution,
   header,
+  resultActions,
+  trackName,
+  savedAs,
 }: RaceViewProps) => {
+  // Results open themselves when the flag falls, but dismissing them returns to
+  // the finished race with its scrubber intact rather than closing anything —
+  // so a chart can send you back to the lap it was describing.
+  const [resultsDismissed, setResultsDismissed] = useState(false);
   const race = useRaceClient({
     track,
     config,
@@ -109,18 +128,39 @@ export const RaceView = ({
         </div>
       </div>
 
-      {race.status === 'finished' && race.result !== undefined ? (
+      {race.status === 'finished' && race.result !== undefined && resultsDismissed ? (
         <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
-          <div className="pointer-events-auto rounded-lg border border-[#2b3543] bg-[#161b24]/95 px-4 py-2 text-sm backdrop-blur">
+          <button
+            type="button"
+            onClick={() => setResultsDismissed(false)}
+            className="pointer-events-auto rounded-lg border border-[#2b3543] bg-[#161b24]/95 px-4 py-2 text-sm backdrop-blur transition-colors hover:bg-[#1f2632]"
+          >
             <span className="text-[#8d9bb0]">Winner </span>
             <span className="font-semibold text-[#e6ebf2]">
               {race.racersById.get(race.result.finishers[0]?.racerId ?? '')?.name ?? '—'}
             </span>
             <span className="ml-3 border-l border-[#2b3543] pl-3 text-[10px] uppercase tracking-wider text-[#8d9bb0]">
-              sim {race.result.simVersion} · {race.result.resultHash.slice(0, 8)}
+              See results
             </span>
-          </div>
+          </button>
         </div>
+      ) : null}
+
+      {race.status === 'finished' && race.result !== undefined && !resultsDismissed ? (
+        <ResultsPanel
+          result={race.result}
+          events={race.events}
+          racers={race.racers}
+          racersById={race.racersById}
+          trackName={trackName ?? track.name}
+          onDismiss={() => setResultsDismissed(true)}
+          actions={resultActions?.(race.result)}
+          versionMismatch={
+            savedAs !== undefined && savedAs.resultHash !== race.result.resultHash
+              ? { savedWith: savedAs.simVersion, runningOn: race.result.simVersion }
+              : undefined
+          }
+        />
       ) : null}
     </div>
   );
