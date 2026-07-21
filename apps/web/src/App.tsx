@@ -4,9 +4,8 @@ import { hasBasemapKey } from '@anywhererace/core';
 import type { RaceConfig } from '@anywhererace/sim';
 import { getVehicleClass } from '@anywhererace/sim';
 import { createTrackStore } from '@anywhererace/store';
-import type { TrackSummary } from '@anywhererace/store';
-import { RaceView, TrackBuilder, TrackList } from '@anywhererace/ui';
-import { buildDemoConfig } from './demoRace';
+import type { RosterPresetSummary, TrackSummary } from '@anywhererace/store';
+import { RaceSetup, RaceView, TrackBuilder, TrackList } from '@anywhererace/ui';
 import { createProviders, describeDegraded } from './providers';
 import type { DegradedState } from './providers';
 
@@ -22,12 +21,13 @@ import type { DegradedState } from './providers';
 type View =
   | { name: 'list' }
   | { name: 'builder' }
+  | { name: 'setup'; track: Track }
   | { name: 'race'; track: Track; config: RaceConfig };
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
 
 export const App = () => {
-  const [degraded, setDegraded] = useState<DegradedState>({ routing: false, elevation: false });
+  const [degraded, setDegraded] = useState<DegradedState>({ routing: false, elevation: false, weather: false });
   const providers = useMemo(
     () => createProviders({ maptilerKey: MAPTILER_KEY, onDegradedChange: setDegraded }),
     [],
@@ -36,18 +36,20 @@ export const App = () => {
 
   const [view, setView] = useState<View>({ name: 'list' });
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
+  const [presets, setPresets] = useState<RosterPresetSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeError, setStoreError] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const result = await store.list();
+    const [result, presetResult] = await Promise.all([store.list(), store.listRosterPresets()]);
     if (result.ok) {
       setTracks(result.value);
       setStoreError(undefined);
     } else {
       setStoreError(result.error.message);
     }
+    if (presetResult.ok) setPresets(presetResult.value);
     setLoading(false);
   }, [store]);
 
@@ -55,17 +57,45 @@ export const App = () => {
     void refresh();
   }, [refresh]);
 
-  const raceTrack = useCallback(
+  const openSetup = useCallback(
     async (id: string) => {
       const result = await store.get(id);
       if (!result.ok) {
         setStoreError(result.error.message);
         return;
       }
-      const track = result.value.track;
-      setView({ name: 'race', track, config: buildDemoConfig(track) });
+      setView({ name: 'setup', track: result.value.track });
     },
     [store],
+  );
+
+  const saveRosterPreset = useCallback(
+    async (name: string, racers: { name: string; color: string; personality: string; skill: number }[]) => {
+      const id = `roster-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const result = await store.saveRosterPreset({ id, name, racers });
+      if (!result.ok) {
+        setStoreError(result.error.message);
+        return;
+      }
+      await refresh();
+    },
+    [store, refresh],
+  );
+
+  const loadRosterPreset = useCallback(
+    async (id: string) => {
+      const result = await store.getRosterPreset(id);
+      return result.ok ? result.value.racers : undefined;
+    },
+    [store],
+  );
+
+  const deleteRosterPreset = useCallback(
+    async (id: string) => {
+      await store.removeRosterPreset(id);
+      await refresh();
+    },
+    [store, refresh],
   );
 
   const saveTrack = useCallback(
@@ -116,6 +146,23 @@ export const App = () => {
     );
   }
 
+  if (view.name === 'setup') {
+    return (
+      <div className="h-dvh w-screen overflow-hidden">
+        <RaceSetup
+          track={view.track}
+          weather={providers.weather}
+          presets={presets}
+          onBack={() => setView({ name: 'list' })}
+          onStart={(config) => setView({ name: 'race', track: view.track, config })}
+          onSavePreset={saveRosterPreset}
+          onLoadPreset={loadRosterPreset}
+          onDeletePreset={deleteRosterPreset}
+        />
+      </div>
+    );
+  }
+
   if (view.name === 'race') {
     const vehicle = getVehicleClass(view.config.vehicleClassId);
     return (
@@ -132,10 +179,10 @@ export const App = () => {
                 <h1 className="text-sm font-semibold text-[#e6ebf2]">{view.track.name}</h1>
                 <button
                   type="button"
-                  onClick={() => setView({ name: 'list' })}
+                  onClick={() => setView({ name: 'setup', track: view.track })}
                   className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
                 >
-                  Back
+                  Settings
                 </button>
               </div>
               <p className="text-xs text-[#8d9bb0]">
@@ -156,7 +203,7 @@ export const App = () => {
         loading={loading}
         error={storeError}
         onCreate={() => setView({ name: 'builder' })}
-        onRace={(id) => void raceTrack(id)}
+        onRace={(id) => void openSetup(id)}
         onDelete={(id) => void deleteTrack(id)}
       />
     </div>

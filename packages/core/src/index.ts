@@ -18,6 +18,7 @@ export * from './providers/maptiler';
 export * from './providers/polyline';
 export * from './providers/valhalla';
 export * from './providers/opentopodata';
+export * from './providers/openmeteo';
 export * from './providers/fallback';
 
 export * from './providers/mock/routing';

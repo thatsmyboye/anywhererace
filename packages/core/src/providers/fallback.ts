@@ -1,6 +1,8 @@
 import type { Result } from '../result';
 import type { LatLng } from '../types/track';
 import type { ElevationError, ElevationProvider } from './elevation';
+import type { ForecastRequest, WeatherError, WeatherProvider } from './weather';
+import type { WeatherSample } from '../types/weather';
 import type { RouteLeg, RouteLegRequest, RoutingError, RoutingProvider } from './routing';
 
 /**
@@ -131,6 +133,49 @@ export const withElevationFallback = (
       degradedUntilMs = now + retryAfterMs;
       options.onDegraded?.(true, result.error.message);
       return fallback.lookup(points);
+    },
+  };
+};
+
+export const withWeatherFallback = (
+  primary: WeatherProvider,
+  fallback: WeatherProvider,
+  options: FallbackOptions = {},
+): WeatherProvider => {
+  const retryAfterMs = options.retryAfterMs ?? DEFAULT_RETRY_AFTER_MS;
+  const clock = options.now ?? defaultClock;
+  let degradedUntilMs = 0;
+
+  return {
+    id: `${primary.id}+fallback`,
+
+    async forecast(request: ForecastRequest): Promise<Result<WeatherSample[], WeatherError>> {
+      const now = clock();
+      if (now < degradedUntilMs) return fallback.forecast(request);
+
+      let result: Result<WeatherSample[], WeatherError>;
+      try {
+        result = await primary.forecast(request);
+      } catch (error: unknown) {
+        degradedUntilMs = now + retryAfterMs;
+        options.onDegraded?.(true, error instanceof Error ? error.message : String(error));
+        return fallback.forecast(request);
+      }
+
+      if (result.ok) {
+        if (degradedUntilMs !== 0) options.onDegraded?.(false, 'Weather service is back.');
+        degradedUntilMs = 0;
+        return result;
+      }
+
+      // `beyond-forecast-horizon` is a true statement about the world, not an
+      // outage. Inventing weather for a date nobody can forecast would be worse
+      // than telling the user to pick a nearer start or set it by hand.
+      if (!isOutage(result.error)) return result;
+
+      degradedUntilMs = now + retryAfterMs;
+      options.onDegraded?.(true, result.error.message);
+      return fallback.forecast(request);
     },
   };
 };

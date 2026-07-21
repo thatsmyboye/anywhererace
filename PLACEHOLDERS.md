@@ -164,8 +164,8 @@ real data:
 - **Weather** is constant or linearly drifting.
 - **Tiles** is a blank background with no network requests.
 
-Open-Meteo is still unwritten — weather is the one provider with no real
-adapter, so every race is run on hand-specified conditions.
+All three real adapters now exist. Valhalla and Open-Meteo have been exercised
+live; Open-Topo-Data has not (see §18).
 
 ---
 
@@ -366,11 +366,12 @@ What follows is what I chose within them.
 ## 18. Things I could not verify here
 
 - **Open-Topo-Data was unreachable from this sandbox** (`Failed to fetch`),
-  while Valhalla returned HTTP 200. So the routing path is proven against the
-  real service and the elevation path is only proven against its fallback. I
-  could not tell whether the failure is this sandbox's network policy or a
-  missing CORS header on the public elevation API — **worth checking from a
-  real browser before trusting real gradients.**
+  while Valhalla and Open-Meteo both returned HTTP 200. So routing and weather
+  are proven against the real services and the elevation path is only proven
+  against its fallback. Since the other two public APIs work from the same
+  origin, a missing CORS header on Open-Topo-Data now looks more likely than a
+  sandbox policy — **worth checking from a real browser, and worth having a
+  second DEM in mind.**
 - **Still no screenshots.** The browser pane times out on the WebGL canvas, so
   the builder was verified functionally: waypoints placed, legs routed against
   live Valhalla, readouts computed, track saved to IndexedDB, reloaded, and
@@ -386,10 +387,63 @@ What follows is what I chose within them.
 
 ---
 
-## 19. Not built at all
+## 19. Race setup
 
-- Race setup — vehicle class, laps, weather, field size, the roster table,
-  "randomize field", roster templates
+**Where:** `packages/ui/src/useRaceSetup.ts`, `packages/ui/src/components/setup/`
+
+Design decisions were made with you at a checkpoint and recorded in CLAUDE.md.
+Within them:
+
+- **Racer names are generated from two invented word lists**
+  (`racerNames.ts`). Deliberately not real people's names, and deliberately not
+  nationality-flavoured — a generator that quietly assigns everyone names from
+  one culture is a choice, and not one worth making by accident. Thirty first
+  names and twenty-four surnames is a small pool; it is enough for distinctness
+  at forty racers but the names repeat in feel across sessions.
+- **Colour is shown, not chosen.** CLAUDE.md lists colour as a roster column,
+  but the OkLCH palette assigns it by position and that is what guarantees no
+  two racers in a field are hard to tell apart. Letting a user pick freely
+  would quietly break the colourblind guarantee the palette exists to provide.
+  Letting them *reorder* palette slots would give control without breaking it,
+  and is not built. **Worth confirming you agree with the trade.**
+- **Default field is twelve, skills spread evenly from 0.50 to 0.95.** Random
+  skills produce fields where four racers are within a percent of each other
+  and nothing decisive happens; an even spread reliably produces a race. The
+  0.50 floor is because below roughly half, a racer is so far off the pace they
+  are not really in the race.
+- **Personalities are drawn at random** from the ten archetypes, so a field
+  usually contains several recognisable characters. Not guaranteed to be
+  distinct.
+- **Default grid is reverse-skill**, because it is by far the most watchable and
+  because a by-skill grid on a narrow track is often processional.
+- **The race-duration estimate** (70% of top speed) is only used to decide how
+  many hours of forecast to fetch, over-fetched by 1.6x. Crude on purpose:
+  under-fetching means the last laps run on extrapolated weather.
+- **The `datetime-local` picker** converts to and from UTC at the boundary.
+  There is no timezone selector — a scheduled start is in the browser's local
+  time, which is almost certainly what someone scheduling a race means, but it
+  is an assumption.
+
+## 20. Race setup gaps
+
+- **No `RaceSetup` or `useRaceSetup` tests.** `generateRacerNames` is covered;
+  the setup state machine is covered only by manual browser verification. Same
+  gap as `useTrackBuilder` (§18) and the same fix: `@testing-library/react`.
+- **Manual weather cannot set cloud or humidity.** Both feed the sim — cloud a
+  small visibility term, humidity the endurance drain — but exposing six
+  sliders for something most users will leave alone seemed worse than four.
+  They keep their defaults.
+- **Saved races are not persisted.** A configured race exists only until you
+  navigate away; the store holds tracks and roster presets, not race configs.
+  That is fine until sharing needs them.
+- **Presets store a colour that is then ignored** on load, because colour is
+  reassigned from the palette by position. Harmless, but the field is dead
+  weight until palette reordering exists.
+
+---
+
+## 21. Not built at all
+
 - The results page — lap chart, position-over-time, sector bests, incident
   timeline, generated narrative
 - `SharedRace`, the compressed URL payload, `simVersion` mismatch banner, OG

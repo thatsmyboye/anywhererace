@@ -416,6 +416,7 @@ All three are optional at runtime and each falls back independently:
 | MapTiler (`VITE_MAPTILER_KEY`) | basemap | blank background, app still works |
 | Valhalla (FOSSGIS public) | snapping routes to real roads | synthetic geometry, flagged in the UI |
 | Open-Topo-Data | real gradients | synthetic hills, flagged in the UI |
+| Open-Meteo | the real forecast, baked at race creation | dry and still, flagged in the UI |
 
 Only MapTiler needs a key: put it in `apps/web/.env.local` (gitignored; see
 `apps/web/.env.example`). It ships to the browser and so is public — restrict it
@@ -483,6 +484,13 @@ These are unresolved. Ask before assuming:
 
 ### Resolved
 
+- **Race setup design.** One scrolling page rather than a wizard, because the
+  settings interact — the routing profile filters the vehicle list, vehicle and
+  laps decide the race duration and therefore how much forecast to fetch, and
+  field size drives the roster. Incompatible vehicle classes are filtered out
+  with a line naming them and explaining what would allow them. Roster colours
+  come from the OkLCH palette by position rather than being user-chosen, so the
+  two-channel colourblind guarantee cannot be broken by accident.
 - **Race view design.** Map-dominant layout with a translucent timing tower and
   event feed floating over it; camera fits the whole track and then leaves the
   user alone; racers are drawn as an OkLCH-spaced colour plus a ring pattern
@@ -493,5 +501,6 @@ These are unresolved. Ask before assuming:
   case it bakes the forecast for that instant. `WeatherSpec`'s `live` variant stores
   `fetchedAt` and `startsAt` separately for exactly this reason, alongside the sampled
   timeline. Either way the weather is baked once and never re-fetched at replay time.
-  The scheduled-start picker and the `beyond-forecast-horizon` error path are defined
-  in the provider interface but have no UI yet.
+  Both are built: race setup defaults to the forecast for now, with a
+  scheduled-start picker, and `beyond-forecast-horizon` is surfaced as a message
+  telling the user to pick a nearer start or set the weather by hand.
