@@ -246,16 +246,81 @@ what argues that. Said so in the file.
 
 ---
 
-## 13. Not built at all
+## 13. The race view
 
-Foundation-first, per your decision. None of this exists yet:
+**Where:** `packages/ui`, `apps/web`
 
-- `packages/ui` and `apps/web` — no React, no MapLibre, no timing tower
-- The Web Worker wrapper. The sim is worker-ready (pure, no DOM, steppable via
-  `RaceRunner.step`) but nothing hosts it in one yet.
+Design decisions were made with you at a checkpoint and are recorded in
+CLAUDE.md under "Resolved": map-dominant layout, camera fits the track and then
+leaves the user alone, markers are colour + ring pattern + number, dark theme
+only. What follows is what I chose *within* those.
+
+- **The OkLCH ramp constants** (`palette.ts`: lightness 0.74, chroma 0.15,
+  start hue 25°) are tuned by eye for a dark basemap. Tested for contrast
+  against the background and for pattern-adjacency, not reviewed by a human.
+- **Four ring patterns** — solid, dashed, dotted, double. Enough for a 40-racer
+  field given the hue spacing, but if the field ever grows past that the second
+  channel runs out.
+- **Marker size** (34px) and the retired-racer treatment (35% opacity plus a
+  cross) are invented.
+- **Gap presentation.** Gaps are derived from distance divided by the *chasing*
+  racer's speed, not from timing loops. Real timing only updates when a racer
+  crosses a loop, which would leave a gap stale for most of a lap — exactly
+  when a fight is developing. Below 2 m/s the gap is shown in metres instead,
+  because dividing by a near-zero speed is meaningless on the grid.
+- **Event feed** shows overtakes, mistakes, crashes, mechanicals and finishes.
+  Lap and sector crossings are deliberately excluded — at forty racers they
+  would drown everything else. Which events are "notable" is a judgment call.
+- **Frame and record rates** (10Hz posted, 5Hz recorded for scrubbing, 20k
+  frame cap) are guesses. An hour-long 40-racer race costs roughly 18MB of
+  worker memory at these settings.
+
+## 14. Deployment is prepared but unproven
+
+The build is static and host-agnostic with relative asset URLs, which should
+work under `anywhererace.banton-digital.com` or anywhere else. It has been
+built and verified locally; it has not been deployed anywhere.
+
+No CI, no deploy pipeline, no custom domain configuration.
+
+## 15. Bugs the browser found
+
+Recording these for the same reason as §9 — the fixes involved judgment:
+
+1. **Tailwind was not scanning `packages/ui`.** Every utility class used in the
+   shared component package produced no CSS, so the map container had no
+   height and MapLibre silently fell back to its 300px minimum. Fixed with an
+   `@source` directive; worth knowing about before adding another package that
+   contains components.
+2. **MapLibre's stylesheet overrode the map container's positioning.**
+   `.maplibregl-map { position: relative }` is applied to whatever element it
+   is handed, at equal specificity and imported later, so `absolute inset-0`
+   lost and the container collapsed. The container is now sized with
+   `h-full w-full`, which does not depend on positioning.
+3. **The timing tower reported a dead heat after the flag.** Finished racers
+   are pinned to exactly the race distance, so every distance-derived gap
+   collapsed to zero. The tower now reads gaps from the classification for any
+   racer whose status is `finished`, which self-corrects when scrubbing back
+   into the race.
+
+I could not capture a screenshot in this environment — the browser pane times
+out on the WebGL canvas — so the layout has been verified functionally
+(container sizing, computed styles, palette contrast, live gap values) rather
+than by looking at it. **Worth an eyeball before you trust the visual design.**
+
+---
+
+## 16. Not built at all
+
+- The track builder — clicking waypoints, dragging to adjust, live snapped
+  route, elevation profile, corner count, undo/redo
+- Race setup — vehicle class, laps, weather, field size, the roster table,
+  "randomize field", roster templates
+- The results page — lap chart, position-over-time, sector bests, incident
+  timeline, generated narrative
 - `SharedRace`, the compressed URL payload, `simVersion` mismatch banner, OG
   images
-- IndexedDB / Dexie persistence, roster templates, Supabase
-- The generated race narrative and commentary (the event log that feeds it is
-  complete and typed)
-- Real provider adapters (§8)
+- IndexedDB / Dexie persistence, Supabase
+- Real provider adapters (§8) — the app still builds its demo track from mocks
+- The debug panel that toggles tick steps 2-5. The toggles exist and are wired
+  through the worker; nothing exposes them in the UI yet.

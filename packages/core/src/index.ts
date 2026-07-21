@@ -14,6 +14,7 @@ export * from './providers/routing';
 export * from './providers/elevation';
 export * from './providers/weather';
 export * from './providers/tiles';
+export * from './providers/maptiler';
 
 export * from './providers/mock/routing';
 export * from './providers/mock/elevation';

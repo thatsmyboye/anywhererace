@@ -74,12 +74,24 @@ packages/
   core/      # shared types, units, geo math, provider interfaces
   sim/       # the deterministic race engine (no DOM, no React)
   track/     # track building: routing, resampling, curvature, gradient, surface
+  worker/    # hosts the sim in a Web Worker; playback, seeking, the wire protocol
   ui/        # React app: editor, race view, results
 apps/
   web/       # Vite app shell
+  cli/       # headless race runner, for tuning the sim without a UI
 ```
 
-Dependency direction is strictly `ui -> track -> sim -> core`. Never the reverse.
+Dependency direction is strictly `ui -> worker -> track -> sim -> core`. Never
+the reverse.
+
+`packages/worker` exists because the worker entry point needs `self` and
+`postMessage`, which `packages/sim` must never import — putting it there would
+break the rule that the sim is provably headless. Keeping it separate also
+means the playback engine (`RaceSession`) is unit-testable in Node against a
+fake clock, with the worker file itself reduced to a twenty-line adapter.
+
+`apps/cli` exists because the simulation had to be watchable long before there
+was a map to watch it on. It is still the fastest way to judge a tuning change.
 
 ---
 
@@ -382,11 +394,20 @@ Rules:
 ```bash
 pnpm install
 pnpm dev             # vite dev server
+pnpm build           # static production bundle
 pnpm test            # vitest
 pnpm test:determinism # golden-seed regression suite
 pnpm typecheck
 pnpm lint
+pnpm race            # headless race runner; --help for options
 ```
+
+### Basemap key
+
+The map needs a MapTiler key, supplied as `VITE_MAPTILER_KEY` in
+`apps/web/.env.local` (gitignored; see `apps/web/.env.example`). Without one the
+app still runs, on a blank background, and says so. The key ships to the browser
+and so is public — restrict it by HTTP referrer in the MapTiler dashboard.
 
 ---
 
@@ -444,6 +465,11 @@ These are unresolved. Ask before assuming:
 
 ### Resolved
 
+- **Race view design.** Map-dominant layout with a translucent timing tower and
+  event feed floating over it; camera fits the whole track and then leaves the
+  user alone; racers are drawn as an OkLCH-spaced colour plus a ring pattern
+  plus a number, so any two are distinguishable on two channels; dark theme
+  only. Auto-follow camera modes are noted in `IDEAS.md` rather than built.
 - **"Real forecast" means both, defaulting to now.** A race bakes the forecast for
   the moment it was created unless the user picks a scheduled future start, in which
   case it bakes the forecast for that instant. `WeatherSpec`'s `live` variant stores

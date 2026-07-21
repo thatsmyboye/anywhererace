@@ -1,0 +1,29 @@
+{
+  "name": "@anywhererace/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@anywhererace/core": "workspace:*",
+    "@anywhererace/sim": "workspace:*",
+    "@anywhererace/track": "workspace:*",
+    "@anywhererace/ui": "workspace:*",
+    "@anywhererace/worker": "workspace:*",
+    "maplibre-gl": "^5.6.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.1.11",
+    "vite": "^6.0.7"
+  }
+}
