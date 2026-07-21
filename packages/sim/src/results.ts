@@ -261,7 +261,7 @@ export const buildIncidentTimeline = (events: readonly RaceEvent[]): Incident[] 
 // --- helpers the UI and the narrative both want -----------------------------
 
 export const isRetirement = (status: RacerStatus): boolean =>
-  status === 'dnf-crash' || status === 'dnf-mechanical';
+  status === 'dnf-crash' || status === 'dnf-mechanical' || status === 'dnf-timeout';
 
 /** Places gained from the grid. Negative means places lost. */
 export const placesGained = (

@@ -124,17 +124,28 @@ describe('determinism', () => {
  * The sanity-range suite is what argues the behavior is reasonable.
  */
 const GOLDEN_HASHES: Record<string, string> = {
-  // Recorded against SIM_VERSION 0.3.0.
+  // Recorded against SIM_VERSION 0.4.0.
   //
-  // Regenerated from 0.1.0 alongside the traffic and skill-weighting fixes:
-  // overtake detection compared positions within a single 50ms tick and so
-  // could never fire; the effort cap on a queued racer erased the pace
-  // advantage that gates a pass attempt; and skill scaled only the
-  // straight-line term, which let riskTolerance outweigh talent on any track
-  // with corners in it. All three change results by design.
+  // The two long, slow races were regenerated when the crash model was made
+  // vehicle- and duration-aware: a crash-severity moment no longer ends the
+  // race at a flat 4% for every class. Whether it is terminal is now a separate
+  // roll against the vehicle's `crashProneness`, normalized to race duration,
+  // and a survived crash becomes a heavy time loss rather than a retirement.
+  // This stops a slow, hours-long bicycle or foot race from emptying its own
+  // finishing order — the "car tactics for a foot race" bug. The gt-racer
+  // circuit is short enough that no crash-severity moment fires in it, so its
+  // RNG stream and hence its hash are unchanged, which is the cheap proof that
+  // car behavior was left alone.
+  //
+  // Earlier regeneration (0.1.0 -> 0.3.0) was for the traffic and
+  // skill-weighting fixes: overtake detection compared positions within a
+  // single 50ms tick and so could never fire; the effort cap on a queued racer
+  // erased the pace advantage that gates a pass; and skill scaled only the
+  // straight-line term, letting riskTolerance outweigh talent on any track with
+  // corners.
   'gt-racer circuit 4 laps, 10 racers': '8ab39f30e1db42f8',
-  'road-cyclist point-to-point 40km, 8 racers': '11f32d802483fe14',
-  'runner trail circuit, wet, 12 racers': '7e52fbdea9d84011',
+  'road-cyclist point-to-point 40km, 8 racers': '0710395c4a88e6b3',
+  'runner trail circuit, wet, 12 racers': '3e34461081004545',
 };
 
 describe('determinism: golden seeds', () => {

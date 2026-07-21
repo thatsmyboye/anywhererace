@@ -10,6 +10,29 @@
       name="description"
       content="Draw a race track on a real map and watch a deterministic simulation play it out."
     />
+
+    <!--
+      Open Graph / Twitter defaults for the app itself. A shared race link
+      (?r=...) carries everything needed to render a per-race card — track
+      shape, winner, margin — via buildRaceOgSvg in @anywhererace/store. Serving
+      that per-race card and rewriting these tags needs a request-time renderer
+      (a serverless function decoding the payload); this SPA has no server, so
+      the crawler-visible defaults live here and the per-race image is the
+      documented next step. See PLACEHOLDERS.md.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AnywhereRace" />
+    <meta property="og:title" content="AnywhereRace" />
+    <meta
+      property="og:description"
+      content="Draw a race track on a real map and watch a deterministic simulation play it out."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AnywhereRace" />
+    <meta
+      name="twitter:description"
+      content="Draw a race track on a real map and watch a deterministic simulation play it out."
+    />
   </head>
   <body>
     <div id="root"></div>

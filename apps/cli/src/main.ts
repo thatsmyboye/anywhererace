@@ -227,7 +227,11 @@ const printClassification = (
 };
 
 const statusLabel = (status: string, laps: number): string =>
-  status === 'dnf-crash' ? `DNF crash L${laps}` : `DNF mech L${laps}`;
+  status === 'dnf-crash'
+    ? `DNF crash L${laps}`
+    : status === 'dnf-timeout'
+      ? `DNF time L${laps}`
+      : `DNF mech L${laps}`;
 
 const printLapChart = (
   result: { finishers: readonly { racerId: string; laps: readonly { lap: number; timeS: number }[] }[] },

@@ -52,6 +52,24 @@ export type VehicleClass = {
   enduranceModel: EnduranceModel;
   /** 0-1 probability of finishing a nominal race without a mechanical. */
   reliability: number;
+
+  /**
+   * 0-1: how often a crash-severity incident actually ends the race, rather
+   * than resolving into a recoverable moment — a fall and remount, a run-off, a
+   * stumble. This is the difference between a foot race and a car race: a
+   * runner who goes down almost always gets up, a cyclist usually remounts, and
+   * only a car reliably retires from a big one. An open-wheel shunt is close to
+   * always terminal.
+   *
+   * Without this, every class shared the same 4% crash-to-DNF weight, which
+   * meant a bicycle or foot race — slow, and therefore hours long, and
+   * therefore thousands of extra ticks — accumulated retirements at a rate that
+   * emptied the finishing order. Applying car odds to a foot race is exactly
+   * the mismatch this fixes; the terminal odds are also duration-normalized in
+   * `race.ts`, the same way `reliability` is, so a long race does not pile up
+   * DNFs without bound.
+   */
+  crashProneness: number;
 };
 
 /**
@@ -181,6 +199,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     enduranceModel: 'stamina',
     // Not mechanical failure so much as a rolled ankle or a blown calf.
     reliability: 0.97,
+    // A runner who trips almost always gets up and keeps going.
+    crashProneness: 0.03,
   },
   {
     id: 'road-cyclist',
@@ -200,6 +220,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.roadTires,
     enduranceModel: 'stamina',
     reliability: 0.96,
+    // A spill can end a race, but most come-togethers are a remount.
+    crashProneness: 0.22,
   },
   {
     id: 'e-scooter',
@@ -219,6 +241,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.smallWheels,
     enduranceModel: 'battery',
     reliability: 0.93,
+    // Low speeds; a fall off a scooter is rarely the end of the day.
+    crashProneness: 0.15,
   },
   {
     id: 'e-bike',
@@ -237,6 +261,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.hybridTires,
     enduranceModel: 'battery',
     reliability: 0.95,
+    crashProneness: 0.15,
   },
   {
     id: 'city-car',
@@ -255,6 +280,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.roadCarTires,
     enduranceModel: 'fuel',
     reliability: 0.97,
+    // A car that has an off is usually done for the day.
+    crashProneness: 0.55,
   },
   {
     id: 'hot-hatch',
@@ -273,6 +300,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.roadCarTires,
     enduranceModel: 'fuel',
     reliability: 0.96,
+    crashProneness: 0.6,
   },
   {
     id: 'sports-car',
@@ -291,6 +319,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.performanceTires,
     enduranceModel: 'fuel',
     reliability: 0.95,
+    crashProneness: 0.72,
   },
   {
     id: 'supercar',
@@ -309,6 +338,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.performanceTires,
     enduranceModel: 'fuel',
     reliability: 0.93,
+    crashProneness: 0.78,
   },
   {
     id: 'rally-car',
@@ -328,6 +358,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     enduranceModel: 'fuel',
     // Lowest in the set. Rally cars break, and that is part of the appeal.
     reliability: 0.88,
+    // Rally offs often continue, but a real crash into the scenery is over.
+    crashProneness: 0.82,
   },
   {
     id: 'gt-racer',
@@ -346,6 +378,7 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.slicks,
     enduranceModel: 'fuel',
     reliability: 0.94,
+    crashProneness: 0.92,
   },
   {
     id: 'open-wheel-racer',
@@ -367,6 +400,8 @@ export const VEHICLE_CLASSES: readonly VehicleClass[] = [
     surfacePenalty: SURFACES.slicks,
     enduranceModel: 'fuel',
     reliability: 0.9,
+    // An open-wheel car has no bodywork to trade; a big one is almost always over.
+    crashProneness: 0.95,
   },
 ];
 

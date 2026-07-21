@@ -1,6 +1,6 @@
 import type { TrackNode, WeatherConditions } from '@anywhererace/core';
 import { clamp, clamp01, lerp } from '@anywhererace/core';
-import type { RaceEvent } from './events';
+import type { MistakeKind, RaceEvent } from './events';
 import type { TrackProfile } from './profile';
 import { nodeIndexAt } from './profile';
 import type { RaceSetup, RacerRuntime } from './setup';
@@ -25,6 +25,12 @@ export type TickContext = {
   readonly toggles: DebugToggles;
   /** Mechanical failure probability per racer per tick. Derived once at init. */
   readonly mechanicalHazardPerTick: number;
+  /**
+   * Probability that a crash-severity moment ends the race for this class, on
+   * this race. Per vehicle and normalized to race duration, derived once at
+   * init — see `race.ts`. A survived crash becomes a heavy time loss instead.
+   */
+  readonly crashDnfChance: number;
   /** Field ordering, front to back, from the start of this tick. */
   readonly ordering: readonly RacerRuntime[];
   readonly conditions: WeatherConditions;
@@ -429,36 +435,66 @@ const rollForMistake = (
   const weights = TUNING.incidents.outcomeWeights;
 
   if (roll < weights.crash) {
-    racer.status = 'dnf-crash';
-    racer.finalDistanceM = racer.distanceM;
-    racer.speedMs = 0;
-    ctx.emit({
-      type: 'crash',
-      tick: ctx.tick,
-      atS: ctx.elapsedS,
-      racerId: racer.spec.id,
-      distanceM: racer.distanceM,
-      lap: racer.lap,
-    });
+    // A crash-severity moment. Whether it ends the race is a separate roll,
+    // against this class's `crashProneness` scaled to race duration: a car
+    // usually retires, a cyclist usually remounts, a runner almost always gets
+    // up. This is what stops a slow, hours-long race from being decided purely
+    // by who failed to finish.
+    if (racer.rng.bool(ctx.crashDnfChance)) {
+      racer.status = 'dnf-crash';
+      racer.finalDistanceM = racer.distanceM;
+      racer.speedMs = 0;
+      ctx.emit({
+        type: 'crash',
+        tick: ctx.tick,
+        atS: ctx.elapsedS,
+        racerId: racer.spec.id,
+        distanceM: racer.distanceM,
+        lap: racer.lap,
+      });
+      return;
+    }
+    // Survived: a fall and remount, or a spin through the run-off. A big loss,
+    // logged as a spin, but the racer continues.
+    const recovery = TUNING.incidents.crashRecoveryCostS;
+    registerMoment(racer, 'spin', racer.rng.range(recovery[0], recovery[1]), composure, forced, ctx);
     return;
   }
 
   const isSpin = roll < weights.crash + weights.spin;
   const range = isSpin ? TUNING.incidents.spinCostS : TUNING.incidents.lockupCostS;
-  const timeLostS = racer.rng.range(range[0], range[1]);
+  registerMoment(
+    racer,
+    isSpin ? 'spin' : 'lockup',
+    racer.rng.range(range[0], range[1]),
+    composure,
+    forced,
+    ctx,
+  );
+};
 
+/**
+ * Book a non-terminal mistake: the time loss as debt, a rattled window whose
+ * length is set by composure — which is what makes mistakes compound for a
+ * Rookie and not for a Veteran — and the event itself.
+ */
+const registerMoment = (
+  racer: RacerRuntime,
+  kind: MistakeKind,
+  timeLostS: number,
+  composure: number,
+  forced: boolean,
+  ctx: TickContext,
+): void => {
   racer.timeDebtS += timeLostS;
-  // Composure decides how long the moment lives in their head, which is what
-  // makes mistakes compound for a Rookie and not for a Veteran.
-  racer.rattledUntilS =
-    ctx.elapsedS + TUNING.incidents.rattledDurationS * (1 - composure);
+  racer.rattledUntilS = ctx.elapsedS + TUNING.incidents.rattledDurationS * (1 - composure);
 
   ctx.emit({
     type: 'mistake',
     tick: ctx.tick,
     atS: ctx.elapsedS,
     racerId: racer.spec.id,
-    kind: isSpin ? 'spin' : 'lockup',
+    kind,
     timeLostS,
     distanceM: racer.distanceM,
     causedByPassAttempt: forced,

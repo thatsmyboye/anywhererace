@@ -1,5 +1,5 @@
 import type { Result } from '@anywhererace/core';
-import { conditionsAt, err, ok } from '@anywhererace/core';
+import { clamp01, conditionsAt, err, ok } from '@anywhererace/core';
 import type { RaceEvent } from './events';
 import { hashResult } from './hash';
 import type { TrackProfile, WindProfile } from './profile';
@@ -71,6 +71,7 @@ class Race implements RaceRunner {
   private readonly wind: WindProfile;
   private readonly toggles: DebugToggles;
   private readonly mechanicalHazardPerTick: number;
+  private readonly crashDnfChanceValue: number;
   private readonly lastPassS = new Map<string, number>();
   /** Last tick's ordering among racers still circulating, by racer id. */
   private previousRanks = new Map<string, number>();
@@ -90,6 +91,7 @@ class Race implements RaceRunner {
     this.profile = buildTrackProfile(setup.track, setup.vehicle);
     this.wind = buildWindProfile(setup.config.weather, setup.expectedDurationS);
     this.mechanicalHazardPerTick = mechanicalHazard(setup);
+    this.crashDnfChanceValue = crashDnfChance(setup);
 
     this.events.push({
       type: 'race-start',
@@ -137,6 +139,7 @@ class Race implements RaceRunner {
       profile: this.profile,
       toggles: this.toggles,
       mechanicalHazardPerTick: this.mechanicalHazardPerTick,
+      crashDnfChance: this.crashDnfChanceValue,
       ordering,
       conditions,
       windNorth: windVector.north,
@@ -323,7 +326,7 @@ class Race implements RaceRunner {
     for (const racer of running) racer.position = position++;
 
     const retired = this.setup.racers
-      .filter((r) => r.status === 'dnf-crash' || r.status === 'dnf-mechanical')
+      .filter((r) => isOut(r.status))
       .sort((a, b) => (b.finalDistanceM ?? 0) - (a.finalDistanceM ?? 0) || compareId(a, b));
     for (const racer of retired) racer.position = position++;
   }
@@ -408,7 +411,10 @@ class Race implements RaceRunner {
     // Anyone still circulating when the flag falls is classified where they are.
     for (const racer of this.setup.racers) {
       if (racer.status === 'racing') {
-        racer.status = 'dnf-mechanical';
+        // Nothing broke — they simply did not finish inside the flag. Calling
+        // this a mechanical would be a lie, and on an over-long course it was
+        // the lie that made a whole field look like it had blown up at once.
+        racer.status = 'dnf-timeout';
         racer.finalDistanceM = racer.distanceM;
       }
     }
@@ -497,11 +503,15 @@ class Race implements RaceRunner {
  * Retired racers sort to the back so nobody drafts a stationary wreck.
  */
 const rankRacers = (a: RacerRuntime, b: RacerRuntime): number => {
-  const aOut = a.status === 'dnf-crash' || a.status === 'dnf-mechanical';
-  const bOut = b.status === 'dnf-crash' || b.status === 'dnf-mechanical';
+  const aOut = isOut(a.status);
+  const bOut = isOut(b.status);
   if (aOut !== bOut) return aOut ? 1 : -1;
   return b.distanceM - a.distanceM || compareId(a, b);
 };
+
+/** A racer who is out of the race, by any of the three ways to be. */
+const isOut = (status: RacerRuntime['status']): boolean =>
+  status === 'dnf-crash' || status === 'dnf-mechanical' || status === 'dnf-timeout';
 
 const compareId = (a: RacerRuntime, b: RacerRuntime): number =>
   a.spec.id < b.spec.id ? -1 : a.spec.id > b.spec.id ? 1 : 0;
@@ -522,4 +532,25 @@ const mechanicalHazard = (setup: RaceSetup): number => {
   const failureChance = 1 - survivalChance;
   const expectedTicks = Math.max(1, setup.expectedDurationS * SIM_HZ);
   return failureChance / expectedTicks;
+};
+
+/**
+ * Probability that a crash-severity moment ends the race, for this class on
+ * this race.
+ *
+ * Crash-severity moments fire at a per-tick rate, so their *count* scales with
+ * how long the race is. If a fixed fraction of them were terminal, terminal
+ * crashes would scale with duration too — which is why a multi-hour bicycle
+ * race used to retire almost everyone. Dividing the per-class `crashProneness`
+ * by the duration ratio cancels that: the expected number of terminal crashes
+ * over a race no longer grows with its length, the same guarantee the
+ * mechanical hazard gives `reliability`. Short races are left alone (the ratio
+ * is capped at 1) so a sprint does not become a demolition derby.
+ */
+const crashDnfChance = (setup: RaceSetup): number => {
+  const durationRatio = Math.max(
+    1,
+    setup.expectedDurationS / TUNING.incidents.crashNominalDurationS,
+  );
+  return clamp01(setup.vehicle.crashProneness / durationRatio);
 };

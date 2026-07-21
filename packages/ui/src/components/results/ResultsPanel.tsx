@@ -198,7 +198,11 @@ const Classification = ({
                 <td className="px-2 py-1 text-right tabular-nums">
                   {finisher.totalTimeS === undefined ? (
                     <span className="text-[#ff5c5c]">
-                      {finisher.status === 'dnf-crash' ? 'Crash' : 'Mechanical'}
+                      {finisher.status === 'dnf-crash'
+                        ? 'Crash'
+                        : finisher.status === 'dnf-timeout'
+                          ? 'Timed out'
+                          : 'Mechanical'}
                     </span>
                   ) : (
                     formatDurationS(finisher.totalTimeS)
