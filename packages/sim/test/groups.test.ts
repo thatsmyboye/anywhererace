@@ -238,14 +238,23 @@ describe('race format', () => {
 });
 
 describe('the shape of the field is observation, not behavior', () => {
-  it('produces identical results and identical group events on a re-run', () => {
-    const first = run(bikeRace());
-    const second = run(bikeRace());
+  it(
+    'produces identical results and identical group events on a re-run',
+    () => {
+      const first = run(bikeRace());
+      const second = run(bikeRace());
 
-    const movesOf = (events: readonly { type: string }[]) =>
-      JSON.stringify(eventsOfType(events as never, 'group') as GroupEvent[]);
-    expect(movesOf(second)).toBe(movesOf(first));
-  });
+      const movesOf = (events: readonly { type: string }[]) =>
+        JSON.stringify(eventsOfType(events as never, 'group') as GroupEvent[]);
+      expect(movesOf(second)).toBe(movesOf(first));
+    },
+    // Two full runs of the same 24-rider, six-lap bike race its sibling below
+    // runs three of. That one was given a timeout when the tick started reading
+    // the shape of the field and it stopped fitting in the default five
+    // seconds; this one was left behind and has been failing perhaps one run in
+    // four ever since, on time rather than on any assertion.
+    30_000,
+  );
 
   it(
     'reports the same race whether it is stepped or run straight through',
