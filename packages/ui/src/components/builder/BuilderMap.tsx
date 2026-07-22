@@ -3,7 +3,12 @@ import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { LatLng, LatLngBounds } from '@anywhererace/core';
 import { interpolateLatLng } from '@anywhererace/core';
-import { insertIndexForLeg, midpointOfPolyline } from '@anywhererace/track';
+import {
+  insertIndexForLeg,
+  midpointOfPolyline,
+  nearestPointOnPolyline,
+  pointAlongPolyline,
+} from '@anywhererace/track';
 import { THEME } from '../../palette';
 import type { BuilderLeg } from '../../useTrackBuilder';
 
@@ -51,6 +56,15 @@ export type BuilderMapProps = {
   initialZoom: number;
   /** Move the camera here. Nothing drawn is affected. */
   focus?: MapFocus | undefined;
+  /**
+   * The routed line, concatenated. Needed to place the start line, which is a
+   * distance along the road rather than a waypoint.
+   */
+  routedPolyline?: readonly LatLng[] | undefined;
+  /** Where the lap starts, in meters along `routedPolyline`. Circuits only. */
+  startLineM?: number | undefined;
+  /** Called with a distance along the route when the start line is dragged. */
+  onMoveStartLine?: ((distanceM: number) => void) | undefined;
   onAddWaypoint: (point: LatLng) => void;
   /** Put a new waypoint at `index`, splitting the leg it was dragged out of. */
   onInsertWaypoint: (index: number, point: LatLng) => void;
@@ -73,6 +87,9 @@ export const BuilderMap = ({
   initialCenter,
   initialZoom,
   focus,
+  routedPolyline,
+  startLineM,
+  onMoveStartLine,
   onAddWaypoint,
   onInsertWaypoint,
   onMoveWaypoint,
@@ -85,13 +102,26 @@ export const BuilderMap = ({
 
   // Handlers are read through refs so the map is built once and never rebuilt
   // just because a callback identity changed.
+  const startMarkerRef = useRef<maplibregl.Marker | undefined>(undefined);
+
   const handlers = useRef({
     onAddWaypoint,
     onInsertWaypoint,
     onMoveWaypoint,
     onRemoveWaypoint,
+    onMoveStartLine,
   });
-  handlers.current = { onAddWaypoint, onInsertWaypoint, onMoveWaypoint, onRemoveWaypoint };
+  handlers.current = {
+    onAddWaypoint,
+    onInsertWaypoint,
+    onMoveWaypoint,
+    onRemoveWaypoint,
+    onMoveStartLine,
+  };
+  // Read through a ref for the same reason: the drag handler is bound once,
+  // and the line it snaps to changes every time a waypoint moves.
+  const routeRef = useRef(routedPolyline);
+  routeRef.current = routedPolyline;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -182,6 +212,58 @@ export const BuilderMap = ({
       markersRef.current = [];
     };
   }, [waypoints]);
+
+  // --- the start line ------------------------------------------------------
+  /**
+   * A draggable line marker, which snaps back onto the road wherever it is
+   * dropped.
+   *
+   * Start and finish used to be pinned to the first waypoint, which meant a
+   * circuit began wherever the user happened to click first — usually mid-
+   * corner. Being able to put the line on a straight is most of what makes a
+   * drawn loop raceable.
+   *
+   * Snapping is the whole gesture: the line is a *distance along the route*,
+   * so a marker dropped in a field has to be projected back onto the line
+   * before it means anything.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    startMarkerRef.current?.remove();
+    startMarkerRef.current = undefined;
+
+    if (map === undefined || onMoveStartLine === undefined) return;
+    const route = routedPolyline;
+    if (route === undefined || route.length < 2) return;
+
+    const at = pointAlongPolyline(route, startLineM ?? 0);
+    if (at === undefined) return;
+
+    const element = startLineElement();
+    const marker = new maplibregl.Marker({ element, draggable: true })
+      .setLngLat([at.lng, at.lat])
+      .addTo(map);
+
+    marker.on('dragend', () => {
+      const dropped = marker.getLngLat();
+      const line = routeRef.current;
+      const snapped =
+        line === undefined
+          ? undefined
+          : nearestPointOnPolyline(line, { lat: dropped.lat, lng: dropped.lng });
+      if (snapped === undefined) return;
+      // Put the marker on the road immediately rather than leaving it where it
+      // was dropped and waiting for the re-render, which reads as a snap.
+      marker.setLngLat([snapped.point.lng, snapped.point.lat]);
+      handlers.current.onMoveStartLine?.(snapped.distanceM);
+    });
+
+    startMarkerRef.current = marker;
+    return () => {
+      marker.remove();
+      startMarkerRef.current = undefined;
+    };
+  }, [routedPolyline, startLineM, onMoveStartLine]);
 
   // --- insert handles ------------------------------------------------------
   /**
@@ -359,6 +441,33 @@ const handlePosition = (leg: BuilderLeg): LatLng | undefined =>
   leg.status.state === 'ok'
     ? midpointOfPolyline(leg.status.leg.polyline)
     : interpolateLatLng(leg.from, leg.to, 0.5);
+
+/**
+ * The start/finish line. A chequered bar rather than a dot, because it is a
+ * *line across the road*, not a point on it — and it has to be distinguishable
+ * at a glance from the waypoint that happens to sit near it.
+ */
+const startLineElement = (): HTMLElement => {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.title = 'Drag along the route to move the start and finish line';
+  element.setAttribute('aria-label', 'Start and finish line. Drag along the route to move it.');
+  element.style.cssText = [
+    'width:22px',
+    'height:22px',
+    'border-radius:4px',
+    'cursor:grab',
+    `border:2px solid ${THEME.background}`,
+    'box-shadow:0 1px 4px rgba(0,0,0,.6)',
+    'padding:0',
+    // A two-by-two chequer, which reads as a finish line at any size.
+    `background-image:linear-gradient(45deg,${THEME.text} 25%,transparent 25%,transparent 75%,${THEME.text} 75%),linear-gradient(45deg,${THEME.text} 25%,transparent 25%,transparent 75%,${THEME.text} 75%)`,
+    'background-size:10px 10px',
+    'background-position:0 0,5px 5px',
+    `background-color:${THEME.background}`,
+  ].join(';');
+  return element;
+};
 
 /**
  * A ghost handle at the middle of a leg. Deliberately smaller and dimmer than

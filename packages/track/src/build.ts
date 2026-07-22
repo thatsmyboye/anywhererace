@@ -51,6 +51,8 @@ export type BuildTrackInput = {
   waypoints: readonly LatLng[];
   routing: RoutingProvider;
   elevation: ElevationProvider;
+  /** Where the lap starts, in meters along the route. See `BakeRoutedInput`. */
+  startLineM?: number | undefined;
 };
 
 export const buildTrack = async (
@@ -76,6 +78,7 @@ export const buildTrack = async (
     waypoints,
     routed: routed.value,
     elevation: input.elevation,
+    startLineM: input.startLineM,
   });
 };
 
@@ -127,6 +130,14 @@ export type BakeRoutedInput = {
   waypoints: readonly LatLng[];
   routed: RoutedRoute;
   elevation: ElevationProvider;
+  /**
+   * Where the lap starts, in meters along the route. Circuits only — on a
+   * point-to-point the start and finish *are* the ends of the route, and
+   * moving them would be trimming it, which dragging the end waypoints
+   * already does. Defaults to the first waypoint, which is where it was
+   * permanently pinned before.
+   */
+  startLineM?: number | undefined;
 };
 
 /**
@@ -188,10 +199,39 @@ export const bakeRoutedTrack = async (
       totalLengthM: baked.lengthMeters,
     }),
     lengthMeters: baked.lengthMeters,
-    startLine: 0,
-    finishLine: baked.lengthMeters,
-    sectors: defaultSectors(baked.lengthMeters),
+    ...placeLines(mode, baked.lengthMeters, input.startLineM),
   });
+};
+
+/**
+ * Start line, finish line and sector boundaries.
+ *
+ * `finishLine` stays one lap ahead of `startLine` rather than being pinned to
+ * the end of the route, because the sim reads the gap between them as the race
+ * distance for a point-to-point — leaving it at the route length while the
+ * start moved would silently shorten the race.
+ *
+ * Sectors are placed *relative to the line*, so sector 1 always begins at it.
+ * They are stored as absolute distances along the route, which is why they
+ * wrap: `setup.ts` rotates them back by `startLine` when it builds a race.
+ */
+const placeLines = (
+  mode: TrackMode,
+  lengthMeters: number,
+  requestedStartM: number | undefined,
+): Pick<Track, 'startLine' | 'finishLine' | 'sectors'> => {
+  const startLine =
+    mode === 'circuit' && requestedStartM !== undefined && lengthMeters > 0
+      ? ((requestedStartM % lengthMeters) + lengthMeters) % lengthMeters
+      : 0;
+
+  return {
+    startLine,
+    finishLine: startLine + lengthMeters,
+    sectors: defaultSectors(lengthMeters).map((offset) =>
+      lengthMeters > 0 ? (startLine + offset) % lengthMeters : offset,
+    ),
+  };
 };
 
 const routeAllLegs = async (

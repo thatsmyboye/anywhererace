@@ -124,8 +124,8 @@ type Track = {
   nodes: TrackNode[];           // BAKED — regenerate whenever polyline changes
   separationPoints?: SeparationPoint[];  // BAKED — see "Separation points"
   lengthMeters: number;
-  startLine: number;            // distance along route
-  finishLine: number;
+  startLine: number;            // distance along route; user-placeable on circuits
+  finishLine: number;           // always startLine + lengthMeters on a circuit
   sectors: number[];            // distances splitting the lap into 3 sectors
 };
 
@@ -549,6 +549,19 @@ to be in-bunch shuffling with nothing worth showing among them.
    in `packages/track/src/legs.ts` owns the one case that is easy to get wrong — a
    circuit's closing leg runs back to waypoint 0, and splitting it inserts at the
    *end* of the list, since inserting at 0 would move the start line instead.
+
+   **The start line is placeable, on circuits.** It was pinned to the first
+   waypoint, so a lap began wherever the user happened to click first — usually
+   mid-corner. A chequered marker now drags along the route and snaps back onto it
+   via `nearestPointOnPolyline`, because the line is a *distance along the road*
+   rather than a point beside it. Two invariants `placeLines` in `build.ts` keeps:
+   `finishLine` stays exactly one lap ahead of `startLine`, since the sim reads the
+   gap between them as the race distance and leaving the finish at the end of the
+   route would silently shorten a point-to-point; and sectors are placed relative
+   to the line so sector 1 always begins at it, stored absolute (and therefore
+   wrapping) because `setup.ts` rotates them back. Point-to-point routes ignore it
+   entirely — their start and finish *are* the ends of the route, and moving them
+   would be trimming it, which dragging the end waypoints already does.
 2. **Race setup** — vehicle class, laps, weather, field size, then a racer roster table
    where each row is name / color / personality / skill, with a "randomize field" button
    and the ability to save the roster as a reusable template.

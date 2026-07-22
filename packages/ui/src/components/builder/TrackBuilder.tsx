@@ -234,6 +234,22 @@ export const TrackBuilder = ({
           </dd>
         </dl>
 
+        {builder.mode !== 'circuit' || builder.routed === undefined ? null : (
+          <div className="flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="text-[#8d9bb0]">
+              Start line{' '}
+              {builder.startLineM === 0
+                ? 'at the first waypoint'
+                : `${units.distance(builder.startLineM)} along`}
+            </span>
+            {builder.startLineM === 0 ? null : (
+              <button type="button" onClick={() => actions.setStartLine(0)} className={ghostButton}>
+                Reset
+              </button>
+            )}
+          </div>
+        )}
+
         <ElevationProfile preview={builder.preview} loading={builder.previewing} />
 
         {builder.saveError === undefined ? null : (
@@ -266,6 +282,9 @@ export const TrackBuilder = ({
           initialCenter={initialCenter}
           initialZoom={initialZoom}
           focus={focus}
+          routedPolyline={builder.routed?.polyline}
+          startLineM={builder.startLineM}
+          {...(builder.mode === 'circuit' ? { onMoveStartLine: actions.setStartLine } : {})}
           onAddWaypoint={actions.addWaypoint}
           onInsertWaypoint={actions.insertWaypoint}
           onMoveWaypoint={actions.moveWaypoint}

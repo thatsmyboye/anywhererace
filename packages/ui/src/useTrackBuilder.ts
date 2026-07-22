@@ -56,6 +56,12 @@ export type BuilderSnapshot = {
   mode: TrackMode;
   routingProfile: RoutingProfile;
   waypoints: LatLng[];
+  /**
+   * Where the lap starts, in meters along the routed line. Circuits only —
+   * see `BakeRoutedInput.startLineM`. Kept in the snapshot rather than beside
+   * it so moving the line is an undoable edit like any other.
+   */
+  startLineM: number;
 };
 
 export type UseTrackBuilderOptions = {
@@ -75,6 +81,7 @@ const EMPTY: BuilderSnapshot = {
   mode: 'circuit',
   routingProfile: 'motor',
   waypoints: [],
+  startLineM: 0,
 };
 
 /**
@@ -191,7 +198,23 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
   );
 
   const setMode = useCallback(
-    (mode: TrackMode) => commit((current) => (current.mode === mode ? current : { ...current, mode })),
+    (mode: TrackMode) =>
+      commit((current) =>
+        current.mode === mode
+          ? current
+          : // A point-to-point starts where it starts, so a line placed on a
+            // circuit is meaningless once the loop is opened up. Dropping it
+            // here rather than ignoring it keeps the snapshot honest.
+            { ...current, mode, startLineM: mode === 'circuit' ? current.startLineM : 0 },
+      ),
+    [commit],
+  );
+
+  const setStartLine = useCallback(
+    (distanceM: number) =>
+      commit((current) =>
+        current.startLineM === distanceM ? current : { ...current, startLineM: distanceM },
+      ),
     [commit],
   );
 
@@ -385,6 +408,7 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
           waypoints: snapshot.waypoints,
           routed: concatenateLegs(detailed),
           elevation,
+          startLineM: snapshot.startLineM,
         });
 
         if (!baked.ok) {
@@ -456,6 +480,7 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
       moveWaypoint,
       removeWaypoint,
       setMode,
+      setStartLine,
       setRoutingProfile,
       setName,
       clear,

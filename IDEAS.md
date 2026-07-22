@@ -124,9 +124,11 @@ line hit-tested under the cursor and the map's own drag suppressed for that
 gesture. Worth doing only if the midpoint handles turn out to feel restrictive
 on long legs.
 
-**Snap the drawn route to a saved track's start line.** Start and finish are
-currently pinned to the first waypoint; letting the user drag the line along the
-route would make circuits far more raceable.
+**A grid, laid out behind the start line.** The line can be placed now, but
+every racer still begins at the same distance and is separated only by their
+lateral offset. Real starting grids are staggered back down the road, which
+would make the first corner mean something — and the line having somewhere
+sensible to be is the prerequisite that was missing.
 
 **Auto-follow camera modes.** The race view deliberately fits the whole track
 and then leaves the camera alone. Two modes were considered and parked: follow
