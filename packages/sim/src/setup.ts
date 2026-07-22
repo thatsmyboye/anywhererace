@@ -43,6 +43,10 @@ export type RacerRuntime = {
   passingUntilS: number;
   /** Side the racer is passing on: +1 right, -1 left, 0 not passing. */
   passingSide: number;
+  /** Elapsed time until which this racer is pressing a committed attack. */
+  attackingUntilS: number;
+  /** Elapsed time before which they will not commit to another one. */
+  attackReadyAtS: number;
 
   lapStartS: number;
   sectorStartS: number;
@@ -291,6 +295,8 @@ const createRuntime = (spec: RacerSpec, slot: number, raceRng: Rng): RacerRuntim
     rattledUntilS: 0,
     passingUntilS: 0,
     passingSide: 0,
+    attackingUntilS: 0,
+    attackReadyAtS: 0,
 
     lapStartS: 0,
     sectorStartS: 0,

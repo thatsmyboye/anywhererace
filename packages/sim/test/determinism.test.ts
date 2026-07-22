@@ -124,9 +124,20 @@ describe('determinism', () => {
  * The sanity-range suite is what argues the behavior is reasonable.
  */
 const GOLDEN_HASHES: Record<string, string> = {
-  // Recorded against SIM_VERSION 0.4.0.
+  // Recorded against SIM_VERSION 0.5.0.
   //
-  // The two long, slow races were regenerated when the crash model was made
+  // All three were regenerated for the peloton change: the tick now reads the
+  // shape of the field. Drafting became group-shaped rather than pairwise (a
+  // racer is sheltered by every wheel ahead of them, plus a share for the turns
+  // their group rotates through), groups acquired a collective pace that riders
+  // hold above their own limit until they empty themselves and come off, the
+  // shelter collapses into an echelon in a crosswind, and racers roll against
+  // the course sweep's separation points to decide where to attack. Every one
+  // of those moves every result, and the two RNG draws added to the tick move
+  // the streams as well — so unlike the previous regeneration there is no class
+  // left untouched, and the gt-racer circuit moved with the rest.
+  //
+  // An earlier regeneration (0.3.0 -> 0.4.0) was for the crash model being made
   // vehicle- and duration-aware: a crash-severity moment no longer ends the
   // race at a flat 4% for every class. Whether it is terminal is now a separate
   // roll against the vehicle's `crashProneness`, normalized to race duration,
@@ -143,9 +154,9 @@ const GOLDEN_HASHES: Record<string, string> = {
   // erased the pace advantage that gates a pass; and skill scaled only the
   // straight-line term, letting riskTolerance outweigh talent on any track with
   // corners.
-  'gt-racer circuit 4 laps, 10 racers': '8ab39f30e1db42f8',
-  'road-cyclist point-to-point 40km, 8 racers': '0710395c4a88e6b3',
-  'runner trail circuit, wet, 12 racers': '3e34461081004545',
+  'gt-racer circuit 4 laps, 10 racers': '38723cae7d61fce3',
+  'road-cyclist point-to-point 40km, 8 racers': '0e395c191925e256',
+  'runner trail circuit, wet, 12 racers': 'cdb6f4c3ae96fb95',
 };
 
 describe('determinism: golden seeds', () => {

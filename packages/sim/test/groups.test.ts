@@ -241,25 +241,33 @@ describe('the shape of the field is observation, not behavior', () => {
     expect(movesOf(second)).toBe(movesOf(first));
   });
 
-  it('reports the same race whether it is stepped or run straight through', () => {
-    // Group sampling is on a tick multiple, so a host stepping at 1x, 2x and
-    // 8x must not see a different race from one that skipped to the end.
-    const straight = runRace(bikeRace());
-    expect(straight.ok).toBe(true);
+  it(
+    'reports the same race whether it is stepped or run straight through',
+    () => {
+      // Group sampling is on a tick multiple, so a host stepping at 1x, 2x and
+      // 8x must not see a different race from one that skipped to the end.
+      const straight = runRace(bikeRace());
+      expect(straight.ok).toBe(true);
 
-    const created = createRace(bikeRace());
-    if (!created.ok) throw new Error(created.error.message);
-    const chunks = [1, 1, 7, 200, 3, 1000, 13];
-    let index = 0;
-    while (created.value.step(chunks[index % chunks.length] as number)) index += 1;
+      const created = createRace(bikeRace());
+      if (!created.ok) throw new Error(created.error.message);
+      const chunks = [1, 1, 7, 200, 3, 1000, 13];
+      let index = 0;
+      while (created.value.step(chunks[index % chunks.length] as number)) index += 1;
 
-    const stepped = created.value.result();
-    if (!stepped.ok || !straight.ok) throw new Error('race did not terminate');
-    expect(stepped.value.resultHash).toBe(straight.value.resultHash);
+      const stepped = created.value.result();
+      if (!stepped.ok || !straight.ok) throw new Error('race did not terminate');
+      expect(stepped.value.resultHash).toBe(straight.value.resultHash);
 
-    const reference = run(bikeRace());
-    expect(JSON.stringify(eventsOfType(created.value.events, 'group'))).toBe(
-      JSON.stringify(eventsOfType(reference, 'group')),
-    );
-  });
+      const reference = run(bikeRace());
+      expect(JSON.stringify(eventsOfType(created.value.events, 'group'))).toBe(
+        JSON.stringify(eventsOfType(reference, 'group')),
+      );
+    },
+    // Three full runs of a 24-rider, six-lap bike race. This sat just inside the
+    // default five seconds until the tick started reading the shape of the field
+    // — group-shaped drafting costs a little per racer-tick, and a bunch that
+    // holds together also keeps more racers circulating to the end.
+    30_000,
+  );
 });

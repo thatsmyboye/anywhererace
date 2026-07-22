@@ -138,9 +138,94 @@ export const TUNING = {
 
     /**
      * Best-case slipstream gain as a fraction of target speed, before
-     * per-class `draftBenefit` and `draftAwareness`. 8% is a strong tow.
+     * per-class `draftBenefit`, `draftAwareness`, and shelter depth.
+     *
+     * Reads higher than it spends. The shelter term below is what a racer
+     * actually multiplies this by, and at one wheel it is only 0.45 — so a
+     * racer sitting on a single wheel gets about 7%, which is roughly the 8%
+     * this constant used to grant unconditionally when drafting was pairwise.
+     * The extra headroom is what a rider deep inside a bunch collects.
      */
-    maxGainFraction: 0.08,
+    maxGainFraction: 0.16,
+
+    /**
+     * Shelter depth at which a racer gets half the maximum tow:
+     * `depth / (depth + halfDepth)`.
+     *
+     * This curve is the whole point of making drafting group-shaped. It has to
+     * rise steeply for the first few wheels and then flatten hard, because that
+     * is what the air does — the difference between riding alone and riding
+     * second wheel is enormous, the difference between tenth and twentieth is
+     * almost nothing. At 1.2 the sequence runs 0.45, 0.63, 0.71 ... 0.94 at
+     * twenty deep.
+     *
+     * Written as a ratio rather than an exponential on purpose: the tick may
+     * only use arithmetic and `Math.sqrt`, and `Math.exp` is
+     * implementation-approximated. See `profile.ts`.
+     */
+    shelterHalfDepth: 1.2,
+
+    /**
+     * Wheels of shelter each *other* member of a racer's group is worth,
+     * regardless of where in it they are sitting.
+     *
+     * This is the term that makes a group a group rather than a queue with a
+     * victim at the head of it. Nobody stays on the front of a bunch — the turns
+     * rotate, and averaged over any length of road that makes every member of a
+     * twenty-rider group faster than a lone rider of identical ability,
+     * including whichever of them happens to be leading right now.
+     *
+     * It has to exist, and it has to apply to the leader: without it the racer
+     * on the front is modelled as riding solo, and a group can never sustain
+     * more than its least sheltered member's pace.
+     *
+     * It also has to stay *small* relative to the wheel term it is added to, and
+     * that is the harder constraint. The gap between what a leader gets and what
+     * a follower gets is the only thing that makes a follower faster, and
+     * therefore the only thing in the model that ever closes a gap. Set high
+     * enough to equalize them and a peloton stops cohering at all — measured on
+     * a 24-rider race it dissolved into twenty individuals inside ten minutes.
+     *
+     * At 0.15 a group of twenty is worth about three wheels to everyone in it,
+     * against the seven or so a rider sitting on a wheel collects on top of
+     * that. Enough to carry the front; not enough to make the front comfortable.
+     */
+    rotationShare: 0.15,
+
+    /**
+     * Crosswind, in m/s across the direction of travel, at which the shelter
+     * starts and finishes collapsing into an echelon.
+     *
+     * A bunch in a crosswind cannot shelter everyone: the usable draft moves
+     * diagonally across the road, runs out at the gutter, and everyone past that
+     * point is exposed however many riders are nominally ahead of them. That is
+     * the whole mechanism by which a flat, windy, dead-straight road — the
+     * `exposed` kind the course sweep flags — destroys a field.
+     *
+     * Deliberately derived from the wind and the road width rather than from
+     * `separationPoints`. The wind is already resolved per node and the width is
+     * already baked, so the echelon falls out of data the tick has anyway; the
+     * sweep's `exposed` points are a *description* of the same roads, not the
+     * input to them.
+     */
+    echelonOnsetMs: 3,
+    echelonFullMs: 9,
+
+    /**
+     * Riders an echelon fits per vehicle width of usable road.
+     *
+     * Well below 1 because a rider in an echelon is not directly behind the one
+     * in front — they are alongside and behind, stepped diagonally across the
+     * road into the wind, so each of them costs appreciably more lateral room
+     * than their own width. At 0.5 an 8m road holds about six riders and a 5m
+     * road under four, which is the size a real echelon reaches before the next
+     * one forms behind it.
+     *
+     * Set at 1.0 first, which put nearly a whole twenty-rider bunch inside a
+     * single echelon on any road wide enough to race on, and left a full
+     * crosswind worth less time than the seed-to-seed noise.
+     */
+    echelonRidersPerWidth: 0.5,
 
     /**
      * Grip lost sitting in dirty air right behind another racer. Matters most
@@ -304,12 +389,119 @@ export const TUNING = {
   },
 
   /**
-   * Reading the shape of the field: who is riding with whom.
+   * Riding in a bunch: how a group holds together, and what it costs to be in
+   * one. See `bunch.ts`.
+   *
+   * Unlike `groups` below, every number here feeds straight back into a racer's
+   * speed. Changing any of them moves every result.
+   */
+  bunch: {
+    /**
+     * Road gap beyond which a racer is no longer riding *with* the group.
+     *
+     * Deliberately looser than `draft.maxGapS` and far tighter than
+     * `groups.splitGapS`, and the ladder those three form is the model. Two
+     * seconds is where the tow ends. Four is where the group ends — a rider who
+     * has slipped off the wheel is out of the shelter but still on terms and
+     * still fighting to get back. Twelve is where a commentator finally calls it
+     * a split. The interval between the first two is where riders are actually
+     * lost: no draft, but still trying to hold a pace set by riders who have
+     * one.
+     */
+    cohesionGapS: 4,
+
+    /**
+     * Longest a single group may be, front to back, in seconds of road.
+     *
+     * Without this, a field strung out evenly at three-second intervals reads as
+     * one group forty riders long, and every one of them takes their pace from a
+     * racer a minute up the road. Twenty seconds is comfortably longer than a
+     * real bunch — thirty riders at half-second spacing is fifteen — so it never
+     * bites on a group that genuinely is one.
+     */
+    maxSpanS: 20,
+
+    /**
+     * How far above their own pace a racer will hold a faster group's, as a
+     * fraction. This is hanging on: going into the red to keep the wheel.
+     *
+     * Small on purpose, because it sits on top of the shelter gain rather than
+     * instead of it — a racer in a bunch is already being carried up to 15%
+     * faster than they could ride alone, and this is the extra dig beyond even
+     * that. Its real cost is not the number but the endurance: effort above a
+     * racer's own pace drains the reservoir quadratically, so a rider hanging on
+     * for long enough will empty themselves and come off anyway.
+     */
+    hangOnHeadroom: 0.06,
+
+    /**
+     * What that headroom shrinks to at an empty reservoir. An exhausted racer
+     * cannot dig, which is what turns "hanging on" into "getting dropped"
+     * without needing a separate rule for the second thing.
+     */
+    hangOnEmptyScale: 0.3,
+  },
+
+  /**
+   * Deciding to go: attacks, and reading the road ahead for where to make one.
+   * See `attackAppeal` in `profile.ts` for how the course sweep is folded into a
+   * per-node number the tick can read in one lookup.
+   */
+  tactics: {
+    /**
+     * Base per-tick chance of committing to an attack, before traits and before
+     * the road. Sized so a one-hour bunch race sees attacks in the handful, not
+     * in the dozens — an attack that happens every other minute is not an
+     * attack, it is the pace.
+     */
+    baseAttackPerTick: 0.000004,
+
+    /** aggression and ambition scale the attack rate across this range. */
+    minAttackMultiplier: 0.2,
+    maxAttackMultiplier: 4.0,
+
+    /**
+     * How much a maximally severe selection point multiplies the attack rate as
+     * a racer reaches it. At 3 a hard climb makes an attack four times as likely
+     * as the same racer on a flat straight, which is the difference between
+     * riders attacking *somewhere* and riders attacking where it works.
+     */
+    selectionAppealBonus: 3.0,
+
+    /**
+     * How far before a selection point riders start reading it. A rider lines up
+     * an attack at the foot of the climb, not halfway up it.
+     */
+    approachM: 300,
+
+    /** How long a committed attack is pressed for. */
+    attackDurationS: 60,
+
+    /**
+     * Extra effort while attacking. Modest, because the expensive part of going
+     * clear is not the effort — it is losing the shelter, which happens
+     * automatically the moment the racer is on the front with nobody to hide
+     * behind. That cost is worth up to 15% of pace and needs no constant.
+     */
+    attackEffortBoost: 0.12,
+
+    /** Reservoir below which nobody has an attack in them. */
+    minReservoir: 0.35,
+
+    /** Enforced quiet period after an attack ends, before the same racer goes again. */
+    cooldownS: 180,
+  },
+
+  /**
+   * Reading the shape of the field: who is riding with whom, as a *commentator*
+   * would call it.
    *
    * Observation only. Nothing here feeds back into a racer's speed, no roll is
    * made against any of it, and switching it off would not change a single
-   * finishing time — which is why there is no debug toggle for it and why it
-   * cannot move the determinism goldens. See `groups.ts`.
+   * finishing time — which is why there is no debug toggle for it. The
+   * behavioral counterpart, which the tick does read, is `bunch` above; the two
+   * are separate because narration wants lag and hysteresis and physics cannot
+   * afford either. See `groups.ts` and `bunch.ts`.
    */
   groups: {
     /**
@@ -543,6 +735,10 @@ export type DebugToggles = {
   weather: boolean;
   wind: boolean;
   draft: boolean;
+  /** Group pace: hanging on to a faster bunch, and sitting in behind a slower one. */
+  bunch: boolean;
+  /** Attacks, and reading the course sweep for where to make one. */
+  tactics: boolean;
   endurance: boolean;
   personality: boolean;
   traffic: boolean;
@@ -556,6 +752,8 @@ export const ALL_TOGGLES_ON: DebugToggles = {
   weather: true,
   wind: true,
   draft: true,
+  bunch: true,
+  tactics: true,
   endurance: true,
   personality: true,
   traffic: true,

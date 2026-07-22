@@ -1,5 +1,7 @@
 import type { Result } from '@anywhererace/core';
 import { clamp01, conditionsAt, err, ok } from '@anywhererace/core';
+import type { BunchMember } from './bunch';
+import { SOLO_BUNCH, readBunch } from './bunch';
 import type { RaceEvent } from './events';
 import type { GroupMember } from './groups';
 import { GroupTracker, classifyPass } from './groups';
@@ -76,9 +78,14 @@ class Race implements RaceRunner {
   private readonly crashDnfChanceValue: number;
   private readonly lastPassS = new Map<string, number>();
   /**
-   * The shape of the field: who is riding with whom. Pure observation — it
-   * reads distances and speeds and emits events, and nothing in the tick ever
-   * consults it, so it cannot affect a result. See `groups.ts`.
+   * The shape of the field as a commentator would call it. Pure observation —
+   * it reads distances and speeds and emits events, and nothing in the tick
+   * consults it, so it cannot affect a result.
+   *
+   * Not to be confused with `bunch.ts`, which answers the neighbouring question
+   * — who is riding with whom *right now* — and which the tick does read. The
+   * two are separate because this one is deliberately slow to believe a change
+   * and the other one cannot afford to be. See both files.
    */
   private readonly groups = new GroupTracker();
   /** Last tick's ordering among racers still circulating, by racer id. */
@@ -141,6 +148,10 @@ class Race implements RaceRunner {
     // updated this tick. That keeps the tick order-independent.
     const ordering = this.orderField();
     const trafficByRacer = this.buildTraffic(ordering);
+    // Who is riding with whom, as the tick needs it — re-read every tick, with
+    // none of the lag `groups.ts` deliberately applies. Built from the same
+    // pre-movement snapshot as the traffic map, for the same reason.
+    const bunchByRacer = readBunch(bunchMembers(ordering));
 
     const ctx = {
       setup: this.setup,
@@ -160,7 +171,12 @@ class Race implements RaceRunner {
     const previousDistances = this.setup.racers.map((r) => r.distanceM);
 
     for (const racer of this.setup.racers) {
-      tickRacer(racer, trafficByRacer.get(racer.spec.id), ctx);
+      tickRacer(
+        racer,
+        trafficByRacer.get(racer.spec.id),
+        bunchByRacer.get(racer.spec.id) ?? SOLO_BUNCH,
+        ctx,
+      );
     }
 
     this.currentTick += 1;
@@ -532,6 +548,22 @@ class Race implements RaceRunner {
     return this.endReason;
   }
 }
+
+/**
+ * The racers still circulating, front to back, in the minimal shape `bunch.ts`
+ * reads. Retired racers are dropped rather than sorted to the back: nobody
+ * shelters behind a wreck, and a group must not be considered broken by one.
+ *
+ * `ordering` is already sorted, and filtering preserves that.
+ */
+const bunchMembers = (ordering: readonly RacerRuntime[]): BunchMember[] => {
+  const members: BunchMember[] = [];
+  for (const racer of ordering) {
+    if (racer.status !== 'racing') continue;
+    members.push({ id: racer.spec.id, distanceM: racer.distanceM, speedMs: racer.speedMs });
+  }
+  return members;
+};
 
 /**
  * Field ordering for traffic: whoever is furthest along the road is in front.

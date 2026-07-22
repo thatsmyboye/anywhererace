@@ -8,14 +8,17 @@ import {
 } from '@anywhererace/core';
 import type { LatLng, RoutingProfile } from '@anywhererace/core';
 import {
+  ALL_TOGGLES_ON,
   ARCHETYPES,
   VEHICLE_CLASSES,
   createRace,
   eventsOfType,
   getVehicleClass,
 } from '@anywhererace/sim';
-import type { RaceEvent, RacerSpec } from '@anywhererace/sim';
+import type { DebugToggles, RaceEvent, RacerSpec } from '@anywhererace/sim';
 import { buildTrack } from '@anywhererace/track';
+
+const TOGGLE_NAMES = Object.keys(ALL_TOGGLES_ON) as (keyof DebugToggles)[];
 
 /**
  * A headless race runner.
@@ -47,9 +50,17 @@ Options:
   --wind <m/s>         wind speed               (default: 0)
   --wind-from <deg>    wind direction           (default: 0)
   --temp <celsius>     temperature              (default: 18)
+  --off <a,b,c>        switch off parts of the tick, comma separated
   --events             print the full event log
   --list               list vehicle classes and personalities
   --help
+
+Tick steps that --off accepts:
+  ${TOGGLE_NAMES.join(', ')}
+
+  Re-running one seed with a step switched off is the fastest way to find out
+  what that step is worth. "--off bunch,tactics" is the race the simulation
+  ran before it knew what a peloton was.
 `.trim();
 
 const main = async (): Promise<number> => {
@@ -66,6 +77,7 @@ const main = async (): Promise<number> => {
       wind: { type: 'string', default: '0' },
       'wind-from': { type: 'string', default: '0' },
       temp: { type: 'string', default: '18' },
+      off: { type: 'string', default: '' },
       events: { type: 'boolean', default: false },
       list: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
@@ -91,6 +103,15 @@ const main = async (): Promise<number> => {
   const fieldSize = Number(values.field);
   const sizeM = Number(values.size);
   const mode = values.mode === 'point-to-point' ? 'point-to-point' : 'circuit';
+
+  const toggles: Partial<DebugToggles> = {};
+  for (const name of (values.off ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (!TOGGLE_NAMES.includes(name as keyof DebugToggles)) {
+      console.error(`Unknown tick step "${name}". Known: ${TOGGLE_NAMES.join(', ')}`);
+      return 1;
+    }
+    toggles[name as keyof DebugToggles] = false;
+  }
 
   const built = await buildTrack({
     id: 'cli-track',
@@ -130,6 +151,7 @@ const main = async (): Promise<number> => {
       seed: values.seed ?? 'cli',
       gridOrder: 'by-skill',
     },
+    ...(Object.keys(toggles).length > 0 ? { toggles } : {}),
   });
 
   if (!created.ok) {
@@ -147,6 +169,7 @@ const main = async (): Promise<number> => {
 
   printTrack(track, vehicle.label);
   printClassification(result, nameById);
+  printSpread(result, toggles);
   printLapChart(result, nameById);
   printIncidents(created.value.events, nameById);
   if (values.events) printEventLog(created.value.events, nameById);
@@ -224,6 +247,41 @@ const printClassification = (
         `${time.padEnd(12)}  ${gap.padEnd(9)}  ${best}`,
     );
   }
+};
+
+/**
+ * How tightly the field finished.
+ *
+ * The number to watch when tuning `TUNING.bunch`. A field that rides in a bunch
+ * finishes far closer together than one that does not, because the shelter is
+ * worth more than the spread in ability between the riders getting it — so if a
+ * change here makes a cycling race look like a time trial, the group model has
+ * stopped holding the field together. Run the same seed with `--off bunch` for
+ * the comparison; that is the race the simulation used to run.
+ */
+const printSpread = (
+  result: { finishers: readonly { status: string; totalTimeS?: number }[] },
+  toggles: Partial<DebugToggles>,
+): void => {
+  const times = result.finishers
+    .filter((f) => f.status === 'finished' && f.totalTimeS !== undefined)
+    .map((f) => f.totalTimeS as number)
+    .sort((a, b) => a - b);
+
+  const winner = times[0];
+  const last = times[times.length - 1];
+  if (winner === undefined || last === undefined || times.length < 2) return;
+
+  const median = times[Math.floor(times.length / 2)] as number;
+  const off = Object.keys(toggles);
+
+  console.log('');
+  console.log(
+    `${times.length} finishers over ${formatDurationS(last - winner, 1)} — ` +
+      `median +${(median - winner).toFixed(1)}s, ` +
+      `spread ${(((last - winner) / winner) * 100).toFixed(1)}% of the winning time` +
+      (off.length > 0 ? `   [off: ${off.join(', ')}]` : ''),
+  );
 };
 
 const statusLabel = (status: string, laps: number): string =>
