@@ -320,12 +320,18 @@ are sheltering them, how large their group is, and what pace it is riding. Four 
 follow from it, and all four move every result:
 
 - **Drafting is group-shaped.** A racer's shelter is every wheel ahead of them in an
-  unbroken slipstream chain, saturating, plus a smaller share for the turns their group
-  rotates through — which is what lets a bunch ride faster than any of its members could
-  alone, including whoever is on the front at that instant. The rotation term must stay
-  small next to the wheel term: the difference between what a leader gets and what a
-  follower gets is the only thing in the model that ever closes a gap, and equalizing the
-  two dissolves a peloton into individuals within ten minutes.
+  unbroken slipstream chain, saturating. The leader must end up with less than the riders
+  behind them: that difference is the only thing in the model that ever closes a gap, and
+  erasing it dissolves a peloton into individuals within ten minutes.
+- **The front rotates, and the turn is real.** There was briefly a flat shelter credit
+  every group member received, standing in for turns nobody took. Now the racer on the
+  front rides above their own sustainable effort for a genuine turn, pays for it out of
+  the reservoir, and swings off — easing until they are several wheels back into the
+  group, because ending the ease as soon as one rider comes past simply puts the
+  strongest rider straight back on the front. That is what lets a bunch ride faster than
+  any of its members could alone. Note the honest limit: a rider *can* now be worn down
+  by leading, but it does not visibly decide races, because at the front of a bunch
+  "did the work" and "is ahead on the road" are the same thing. See `IDEAS.md`.
 - **A group has a collective pace** — the mean speed of its members — and racers hold it
   above their own limit by up to `bunch.hangOnHeadroom`, shrinking as the reservoir
   empties. Past that they cannot, and they come off. It has to be the mean and not the
@@ -340,9 +346,21 @@ follow from it, and all four move every result:
   hanging on drains more. That single ratio is the whole mechanism by which a peloton
   drops people.
 - **Echelons.** In a crosswind the shelter runs out at the width of the road; the rider
-  past the end of it is in the gutter, with a fresh echelon forming behind them. Derived
-  from the per-node wind and width, not from `separationPoints` — the sweep's `exposed`
-  points describe the same roads but are not the input to this.
+  past the end of it is in the gutter, with a fresh and progressively more compromised
+  echelon forming behind them. Derived from the per-node wind and width, not from
+  `separationPoints` — the sweep's `exposed` points describe the same roads but are not
+  the input to this. It fires hard per rider and is **not** measurable in a race result,
+  because the field reorganises around it; assert it on `echelonDepth` directly rather
+  than through a race.
+- **A dropped rider decides what to do about it.** Chase, sit up, or soft-pedal until
+  the group behind arrives — rolled once from `ambition` and `composure` at the moment
+  contact goes, and held. Going clear off the front is deliberately not this, or a racer
+  would sit up in the middle of their own attack.
+- **Attacks read the field as well as the road.** `attackAppeal` says where the road
+  rewards a move; the gap to the group up the road and the size of the group a racer is
+  in say whether it is worth making. A big bunch attacks itself apart far less readily
+  than a committed group of three — the free-rider problem, and the reason
+  `tactics.onusHalfGroupSize` exists.
 
 A consequence worth knowing before writing a test: a bunch race finishes with a **tight
 median and a long tail**. Do not assert on first-to-last, which gets *wider* — a peloton

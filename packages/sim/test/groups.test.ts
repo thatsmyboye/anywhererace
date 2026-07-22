@@ -7,7 +7,13 @@ import { createRace, runRace } from '../src/race';
 import { TUNING } from '../src/tuning';
 import type { RaceInput } from '../src/types';
 import { getVehicleClass } from '../src/data/vehicles';
-import { makeConfig, makeField, makeSyntheticTrack, manualWeather } from './fixtures';
+import {
+  makeConfig,
+  makeField,
+  makeSyntheticTrack,
+  manualWeather,
+  yieldToEventLoop,
+} from './fixtures';
 
 /**
  * The field's shape, and the noise suppression it exists to make possible.
@@ -243,11 +249,12 @@ describe('the shape of the field is observation, not behavior', () => {
 
   it(
     'reports the same race whether it is stepped or run straight through',
-    () => {
+    async () => {
       // Group sampling is on a tick multiple, so a host stepping at 1x, 2x and
       // 8x must not see a different race from one that skipped to the end.
       const straight = runRace(bikeRace());
       expect(straight.ok).toBe(true);
+      await yieldToEventLoop();
 
       const created = createRace(bikeRace());
       if (!created.ok) throw new Error(created.error.message);
@@ -258,6 +265,7 @@ describe('the shape of the field is observation, not behavior', () => {
       const stepped = created.value.result();
       if (!stepped.ok || !straight.ok) throw new Error('race did not terminate');
       expect(stepped.value.resultHash).toBe(straight.value.resultHash);
+      await yieldToEventLoop();
 
       const reference = run(bikeRace());
       expect(JSON.stringify(eventsOfType(created.value.events, 'group'))).toBe(

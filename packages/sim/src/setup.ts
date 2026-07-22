@@ -8,6 +8,14 @@ import { getArchetype, rollTraits } from './traits';
 import { TUNING } from './tuning';
 import type { LapRecord, RaceConfig, RaceInput, RacerSpec, RacerStatus, SimError } from './types';
 
+/**
+ * How a racer responded to being dropped.
+ *
+ * `none` covers both "still in a group" and "riding alone having never been in
+ * one", which are the same thing as far as behavior goes: nothing to react to.
+ */
+export type DroppedResponse = 'none' | 'chase' | 'sit-up' | 'wait';
+
 /** Mutable per-racer state. Lives for one race and is never shared between races. */
 export type RacerRuntime = {
   readonly spec: RacerSpec;
@@ -47,6 +55,32 @@ export type RacerRuntime = {
   attackingUntilS: number;
   /** Elapsed time before which they will not commit to another one. */
   attackReadyAtS: number;
+
+  /**
+   * When this racer took the front of their group, or -1 when they are not on
+   * it. A turn on the front is a stretch of time, so it needs a start.
+   */
+  pullStartedS: number;
+  /**
+   * Elapsed time by which a swing off the front must be over, or 0 when not
+   * swinging. A deadline rather than a flag because the swing normally ends on a
+   * condition — being several wheels back into the group — and something has to
+   * stop a rider easing forever if that condition never arrives.
+   */
+  swingOffUntilS: number;
+
+  /**
+   * What this racer decided to do about losing the wheel, and until when.
+   * Rolled once at the moment contact goes; see `TUNING.bunch.dropped`.
+   */
+  droppedResponse: DroppedResponse;
+  droppedUntilS: number;
+  /**
+   * Size of the group they were in last tick. The only way to notice the
+   * *transition* — being dropped is an event, and `BunchState` only ever
+   * describes the present.
+   */
+  lastGroupSize: number;
 
   lapStartS: number;
   sectorStartS: number;
@@ -297,6 +331,11 @@ const createRuntime = (spec: RacerSpec, slot: number, raceRng: Rng): RacerRuntim
     passingSide: 0,
     attackingUntilS: 0,
     attackReadyAtS: 0,
+    pullStartedS: -1,
+    swingOffUntilS: 0,
+    droppedResponse: 'none',
+    droppedUntilS: 0,
+    lastGroupSize: 1,
 
     lapStartS: 0,
     sectorStartS: 0,
