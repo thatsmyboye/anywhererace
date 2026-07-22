@@ -18,8 +18,12 @@ import { TICK_SECONDS, TUNING } from './tuning';
  * not move a single finishing time, which is exactly why it cannot move the
  * determinism goldens either.
  *
- * The behavioral half — a field that actually splits on the climbs the course
- * sweep found — is deliberately not here. See IDEAS.md.
+ * That is still true, and it is no longer true of the *other* group module.
+ * `bunch.ts` answers the neighbouring question — who is riding with whom right
+ * now — and the tick does read it. The split is deliberate: narration wants a
+ * loose threshold and twenty seconds of confirmation before it will believe a
+ * gap, and physics can afford neither. Keeping them apart is what lets this file
+ * go on being provably inert.
  */
 
 /** The minimum a racer has to be for their position in the field to be read. */

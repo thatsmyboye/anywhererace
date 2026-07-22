@@ -12,4 +12,4 @@
  *   minor — tuning changes that alter outcomes but not the config schema
  *   major — a change to RaceConfig, Traits, or the event log shape
  */
-export const SIM_VERSION = '0.4.0';
+export const SIM_VERSION = '0.5.0';

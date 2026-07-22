@@ -15,16 +15,27 @@ import { BAKE, SEPARATION } from './constants';
  * of road where a bunch could come apart: climbs, pinch points, technical
  * sections, rough surfaces, and long exposed drags.
  *
- * Three things this deliberately is not:
+ * The sim reads this. `packages/sim/src/profile.ts` flattens the points into a
+ * per-node `attackAppeal`, and racers roll against it to decide where to attack
+ * — so a rider is far likelier to go at the foot of a climb than on an open
+ * straight. That was not true when this file was written, and it is the one
+ * claim here that changed: the sweep is now an input to behavior, and editing a
+ * threshold below will move race results and the determinism goldens with them.
  *
- *   It is not a prediction. Nothing in `packages/sim` reads the output, no
- *   racer behaves differently because of it, and the same course raced twice
- *   will not necessarily split in the same places — or at all. It is a read on
- *   the *road*, in the same family as corner count and total climb.
+ * Three things it is still deliberately not:
+ *
+ *   It is not a prediction. It says where a field *could* come apart, not where
+ *   one will: the tick reads it as a reason to attack, never as an instruction
+ *   to split, and the same course raced twice will not necessarily break up in
+ *   the same places or at all. It remains a read on the *road*, in the same
+ *   family as corner count and total climb, and the UI copy must not promise
+ *   otherwise.
  *
  *   It is not weather-aware. The sweep runs when the course is saved, long
  *   before any race bakes a forecast, so the one kind that depends on
  *   conditions — `exposed` — says so in its own copy rather than pretending.
+ *   (The sim gets echelons on those roads anyway, but it gets them from the wind
+ *   and the road width at each node, not from these points.)
  *
  *   It is not per-class. The thresholds are calibrated for road cycling because
  *   that is the format the question is asked about, and because it is the

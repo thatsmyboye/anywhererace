@@ -12,6 +12,7 @@ export * from './data/vehicles';
 export * from './types';
 export * from './events';
 export * from './groups';
+export * from './bunch';
 export * from './hash';
 export * from './setup';
 export * from './profile';

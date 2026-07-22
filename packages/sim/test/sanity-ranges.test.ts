@@ -236,6 +236,156 @@ describe('sanity ranges: cornering', () => {
 });
 
 /**
+ * A bunch is supposed to behave like a bunch.
+ *
+ * The rows CLAUDE.md's sanity table gained when the tick learned to read the
+ * shape of the field. Both are comparative rather than absolute, because what
+ * matters is the *direction* the group model moves a race in — an absolute
+ * finishing spread would only be re-recording whatever the tuning currently
+ * happens to produce, which is what the determinism goldens are for.
+ */
+describe('sanity ranges: a bunch behaves like a bunch', () => {
+  // Twenty riders over 10km, run twice per seed. Long enough for a bunch to form
+  // and select, short enough that no single test blocks the vitest worker for
+  // the tens of seconds that starve its RPC heartbeat. Comfortably past the
+  // default per-test timeout and nowhere near the long-race one below.
+  const BUNCH_TIMEOUT_MS = 60_000;
+
+  type Spread = {
+    medianGapS: number;
+    winnerTimeS: number;
+    meanTimeS: number;
+  };
+
+  /**
+   * How tightly a field finished, relative to the winning time. Retirements are
+   * excluded: a race that sheds half its field has not bunched up, and counting
+   * a DNF as a large gap would let it look as though it had.
+   */
+  const spreadOf = (
+    track: ReturnType<typeof makeSyntheticTrack>,
+    seed: string,
+    options: { weather?: ReturnType<typeof manualWeather>; toggles?: Record<string, boolean> } = {},
+  ): Spread => {
+    const result = runRace({
+      track,
+      config: makeConfig({
+        vehicleClassId: 'road-cyclist',
+        racers: makeField({ size: 20 }),
+        laps: 1,
+        seed,
+        ...(options.weather ? { weather: options.weather } : {}),
+      }),
+      // Incidents off throughout: one unlucky spin swamps the effect under test.
+      toggles: { incidents: false, mechanicalFailures: false, ...options.toggles },
+    });
+    if (!result.ok) throw new Error(result.error.message);
+
+    const times = result.value.finishers
+      .filter((f) => f.status === 'finished' && f.totalTimeS !== undefined)
+      .map((f) => f.totalTimeS as number)
+      .sort((a, b) => a - b);
+
+    const winner = times[0] as number;
+    return {
+      medianGapS: (times[Math.floor(times.length / 2)] as number) - winner,
+      winnerTimeS: winner,
+      meanTimeS: times.reduce((total, time) => total + time, 0) / times.length,
+    };
+  };
+
+  const SEEDS = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'];
+  const mean = (values: readonly number[]): number =>
+    values.reduce((total, value) => total + value, 0) / values.length;
+
+  it(
+    'a bunch rides faster than the same riders strung out',
+    () => {
+      // The shelter a group gives itself, measured end to end. This is a
+      // systematic five percent or so and it holds on every seed, which is why
+      // it is safe to assert per seed unlike the two aggregate rows around it.
+      const track = makeSyntheticTrack({ lengthM: 10_000 });
+
+      for (const seed of SEEDS) {
+        const bunched = spreadOf(track, seed);
+        const strungOut = spreadOf(track, seed, { toggles: { bunch: false, tactics: false } });
+
+        expect(
+          bunched.winnerTimeS,
+          `seed ${seed}: winner ${bunched.winnerTimeS.toFixed(1)}s in a bunch ` +
+            `against ${strungOut.winnerTimeS.toFixed(1)}s without one`,
+        ).toBeLessThan(strungOut.winnerTimeS);
+      }
+    },
+    BUNCH_TIMEOUT_MS,
+  );
+
+  it(
+    'the bulk of a bunch arrives closer together than a strung-out field',
+    () => {
+      // The prediction IDEAS.md made when this was still a v2 candidate:
+      // shelter is worth more than the spread in ability between the riders
+      // getting it, so a field that holds together arrives together. Roughly a
+      // third off the median gap, and in that direction on most but not all
+      // seeds — one race in six or so has a rider come off early and drag the
+      // middle of the field back with them, so this is asserted across seeds.
+      //
+      // Note what is deliberately *not* asserted: the gap from first to last.
+      // That gets *wider*, and it should. A peloton that behaves like one holds
+      // its bulk together and spits individual riders out the back, so the right
+      // shape for a bunch race is a tight median with a long tail. Asserting on
+      // the tail would be asserting that nobody is ever dropped, which is the
+      // behavior this whole change exists to produce.
+      const track = makeSyntheticTrack({ lengthM: 10_000 });
+
+      const bunched = SEEDS.map((seed) => spreadOf(track, seed).medianGapS);
+      const strungOut = SEEDS.map(
+        (seed) => spreadOf(track, seed, { toggles: { bunch: false, tactics: false } }).medianGapS,
+      );
+
+      expect(
+        mean(bunched),
+        `median gap averaged ${mean(bunched).toFixed(1)}s in a bunch ` +
+          `against ${mean(strungOut).toFixed(1)}s without one`,
+      ).toBeLessThan(mean(strungOut));
+    },
+    BUNCH_TIMEOUT_MS,
+  );
+
+  it(
+    'a crosswind costs a bunch time with no headwind in it at all',
+    () => {
+      // The echelon, tested through the one channel that can only be the
+      // echelon. The synthetic track runs due east and the wind is from due
+      // north, so the along-route component is exactly zero — the headwind term
+      // contributes nothing, and nothing else in the tick reads wind. Were the
+      // shelter not collapsing into echelons, a pure crosswind would be worth
+      // precisely no time and this would be asserting that a number exceeds
+      // itself.
+      //
+      // Averaged over seeds rather than asserted on each, and that is a real
+      // limitation rather than a convenience. The riders at the front of the
+      // first echelon are not in the gutter and do not lose anything, so what
+      // the wind costs lands on the back half of the field and reaches the
+      // aggregate diluted — around a percent, against seed-to-seed swings
+      // several times that. One seed proves nothing here; six do.
+      const track = makeSyntheticTrack({ lengthM: 10_000, widthMeters: 5 });
+      const crosswind = manualWeather({ windSpeedMs: 12, windFromDegrees: 0 });
+
+      const still = SEEDS.map((seed) => spreadOf(track, seed).meanTimeS);
+      const blown = SEEDS.map((seed) => spreadOf(track, seed, { weather: crosswind }).meanTimeS);
+
+      expect(
+        mean(blown),
+        `field averaged ${mean(blown).toFixed(1)}s in a crosswind ` +
+          `against ${mean(still).toFixed(1)}s in still air`,
+      ).toBeGreaterThan(mean(still));
+    },
+    BUNCH_TIMEOUT_MS,
+  );
+});
+
+/**
  * Finishing is supposed to be the common case.
  *
  * This is the regression suite for the "car tactics in a foot race" bug. A

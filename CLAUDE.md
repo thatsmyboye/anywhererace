@@ -171,11 +171,17 @@ type SeparationPoint = {
 
 Four rules govern it:
 
-1. **It is an observation about the road, not a prediction about a race.** Nothing in
-   `packages/sim` reads it, no racer behaves differently because of it, and two races
-   over the same course will not necessarily split in the same places or at all. It sits
-   in the same family as corner count and total climb. The UI copy must not promise
-   otherwise.
+1. **It is an observation about the road, not a prediction about a race.** It says where
+   a field *could* come apart, never where one will. The sim does read it — `profile.ts`
+   flattens the points into a per-node `attackAppeal` and racers roll against it to
+   choose where to attack — but that is a reason to go, not an instruction to split, and
+   two races over the same course will not necessarily break up in the same places or at
+   all. It sits in the same family as corner count and total climb. The UI copy must not
+   promise otherwise.
+
+   Because the sim reads it, the thresholds are now load-bearing: changing one moves race
+   results and the determinism goldens with them. That was not true when the sweep
+   shipped.
 2. **The thresholds are calibrated for road cycling**, because that is the format the
    question is asked about and because it is the strictest case — a bunch of cyclists
    holds together through things that would already have strung out a field of cars.
@@ -282,10 +288,10 @@ bridged, what split, what came back together.
 threshold would sweep in the open-wheel racer, which tows hard but races one car at a
 time.
 
-**Groups are observation, not behavior.** `packages/sim/src/groups.ts` derives which
-racers are riding together, purely from distances and speeds. It never touches an `Rng`,
-nothing in the tick consults it, and deleting it would not change a result — which is
-also why it cannot move the determinism goldens. It produces two things:
+**Narration groups are observation, not behavior.** `packages/sim/src/groups.ts` derives
+which racers are riding together, purely from distances and speeds. It never touches an
+`Rng`, nothing in the tick consults it, and deleting it would not change a result — which
+is also why it cannot move the determinism goldens. It produces two things:
 
 - `GroupEvent` — `attack`, `bridge`, `split`, `catch`, `dropped`, with the groups on
   either side and the gap between them.
@@ -301,8 +307,47 @@ threshold flaps across it forever — measured on a 30-rider five-hour race, add
 group moves from about 1600 to under 100 without losing a real one. If you are retuning
 this, `pnpm race` prints the broadcast counts; that is what it is for.
 
-The **behavioral** half — a field that actually splits on the climbs the course sweep
-found — is deliberately not built. See `IDEAS.md`.
+### Riding in a bunch
+
+The **behavioral** half lives in `packages/sim/src/bunch.ts`, and unlike `groups.ts` the
+tick does read it. Two modules rather than one because they answer different questions and
+neither threshold suits the other job: narration wants a loose twelve-second gap and
+twenty seconds of confirmation before it will believe anything, and physics can afford
+neither. Keeping them apart is what lets `groups.ts` go on being provably inert.
+
+`bunch.ts` is re-read every tick with no hysteresis, and reports per racer how many wheels
+are sheltering them, how large their group is, and what pace it is riding. Four things
+follow from it, and all four move every result:
+
+- **Drafting is group-shaped.** A racer's shelter is every wheel ahead of them in an
+  unbroken slipstream chain, saturating, plus a smaller share for the turns their group
+  rotates through — which is what lets a bunch ride faster than any of its members could
+  alone, including whoever is on the front at that instant. The rotation term must stay
+  small next to the wheel term: the difference between what a leader gets and what a
+  follower gets is the only thing in the model that ever closes a gap, and equalizing the
+  two dissolves a peloton into individuals within ten minutes.
+- **A group has a collective pace** — the mean speed of its members — and racers hold it
+  above their own limit by up to `bunch.hangOnHeadroom`, shrinking as the reservoir
+  empties. Past that they cannot, and they come off. It has to be the mean and not the
+  leader's speed: read from the leader, a group's pace *is* the strongest rider's solo
+  pace, and everyone slower than the headroom is dropped by construction.
+- **Nothing damps a racer down toward a slower group.** That was tried and removed. It
+  double-counts the traffic model, which already refuses to let a racer ride through the
+  one ahead, and it stops a follower ever being quicker than the rider in front, so no
+  gap is ever closed and the field ratchets apart. The saving from sitting in is booked
+  as effort rather than speed: `deliveredEffort` is the ratio of achieved pace to own
+  pace, uncapped in both directions, so being held up drains less of the reservoir and
+  hanging on drains more. That single ratio is the whole mechanism by which a peloton
+  drops people.
+- **Echelons.** In a crosswind the shelter runs out at the width of the road; the rider
+  past the end of it is in the gutter, with a fresh echelon forming behind them. Derived
+  from the per-node wind and width, not from `separationPoints` — the sweep's `exposed`
+  points describe the same roads but are not the input to this.
+
+A consequence worth knowing before writing a test: a bunch race finishes with a **tight
+median and a long tail**. Do not assert on first-to-last, which gets *wider* — a peloton
+holding its bulk together while spitting individuals out the back is the behavior this
+exists to produce.
 
 ### Personalities
 
@@ -377,7 +422,14 @@ the product and it will be tuned constantly.
    (stamina/fuel/battery drain), tire/tread wear where the class has it.
 3. **Personality overlay**: `riskTolerance` scales the corner limit up or down;
    `pacing` sets a target effort curve across race distance; `consistency` sets the
-   width of a per-tick noise term drawn from the racer's RNG stream.
+   width of a per-tick noise term drawn from the racer's RNG stream. Also where a racer
+   decides to *attack*, rolling against `aggression` and `ambition` scaled by the
+   `attackAppeal` of the road ahead. Nothing is emitted on the decision — whether the
+   move opens a gap is the ground truth, and `groups.ts` reports that if it happens.
+   **3b, the bunch** — a step in its own right, numbered this way only so the four below
+   keep the numbers they have always had. If the racer is in a group they ride its
+   collective pace rather than their own, holding above their own limit until they empty
+   themselves and come off the back. See "Riding in a bunch".
 4. **Traffic**: if a racer ahead is within the closing distance, either follow (dirty
    air / slower pace) or attempt a pass. Pass resolution is a probability roll from
    `racecraft`, `aggression`, speed delta, and available track width at that node.
@@ -388,8 +440,9 @@ the product and it will be tuned constantly.
 6. **Integrate**: apply accel/brake toward target speed, advance
    `distanceAlongRoute`, update lateral offset, check line crossings, emit events.
 
-Everything in step 2–5 must be individually toggleable via a debug panel so we can
-isolate why a race felt wrong.
+Everything in steps 2–5, 3b included, must be individually toggleable via a debug panel
+so we can isolate why a race felt wrong. `pnpm race --off <steps>` is the same switches
+from the command line, and is what the debug panel will drive when it exists.
 
 ---
 
@@ -500,7 +553,14 @@ pnpm test:determinism # golden-seed regression suite
 pnpm typecheck
 pnpm lint
 pnpm race            # headless race runner; --help for options
+pnpm race --off bunch,tactics   # re-run one seed with part of the tick switched off
 ```
+
+`--off` takes any of the `DebugToggles` keys. Re-running a seed with a step disabled is
+the fastest way to find out what that step is worth, and it is how the peloton model was
+tuned — `--off bunch,tactics` is the race the simulation ran before it knew what a bunch
+was. The runner prints the finishing spread alongside the broadcast counts for exactly
+this comparison.
 
 ### External services
 
@@ -537,6 +597,14 @@ track list can say so.
 - Sanity ranges: a road cyclist on a flat 40km course should finish in roughly 60–70
   minutes. If the sim says 20, the physics is wrong. Keep a table of these expectations
   and assert against them.
+- Some sanity rows have to be **averaged across seeds** rather than asserted per seed,
+  and the ones that do say so and say why. A bunch riding faster than a strung-out field
+  is a systematic five percent and holds every time; the median gap closing, and a
+  crosswind costing an echelon time, are real but comparable to seed-to-seed swing. A
+  per-seed assertion on either is a flaky test wearing a confident comment.
+- Keep the long ones short enough not to block the vitest worker for tens of seconds at a
+  stretch, or its RPC heartbeat times out and the suite fails with an unhandled error
+  while every test passes.
 
 ---
 
@@ -585,10 +653,16 @@ These are unresolved. Ask before assuming:
   for the whole field so the class already settles it and a separate control could only
   contradict it. The sim tags each pass with its significance rather than leaving the UI
   to guess, because only the sim knows the shape of the field.
-- **The separation sweep is informational.** It runs at course creation and is stored on
-  the track; the simulation does not read it. Making a field actually split at those
-  points is a behavioral change to the tick and belongs on its own branch — see
-  `IDEAS.md`.
+- **The separation sweep is an input to tactics, not to outcomes.** It runs at course
+  creation and is stored on the track. The sim reads it as one number per node —
+  `attackAppeal` — which raises the odds that a racer commits to an attack there. It
+  never makes a field split; whether a move sticks is decided by the same physics as
+  everything else. This was informational only until the peloton change, and the sweep's
+  thresholds became golden-moving at that point.
+- **A peloton behaves like one, and it is `bunch.ts` that does it, not `groups.ts`.**
+  The narration layer stays inert and a second module carries the behavior, because the
+  thresholds and the lag that make a commentator readable would make the physics wrong.
+  See "Riding in a bunch".
 - **Results design.** A dismissable panel over the finished race rather than a
   separate screen, so the scrubber survives underneath and a chart can send you
   back to the lap it describes. Order is classification, then the generated

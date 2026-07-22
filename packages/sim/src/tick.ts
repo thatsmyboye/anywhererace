@@ -1,5 +1,6 @@
 import type { TrackNode, WeatherConditions } from '@anywhererace/core';
 import { clamp, clamp01, lerp } from '@anywhererace/core';
+import type { BunchState } from './bunch';
 import type { MistakeKind, RaceEvent } from './events';
 import type { TrackProfile } from './profile';
 import { nodeIndexAt } from './profile';
@@ -48,7 +49,12 @@ type Traffic = {
   readonly gapS: number;
 };
 
-export const tickRacer = (racer: RacerRuntime, ahead: Traffic | undefined, ctx: TickContext): void => {
+export const tickRacer = (
+  racer: RacerRuntime,
+  ahead: Traffic | undefined,
+  bunch: BunchState,
+  ctx: TickContext,
+): void => {
   if (racer.status !== 'racing') return;
 
   const { setup, profile, toggles } = ctx;
@@ -59,7 +65,15 @@ export const tickRacer = (racer: RacerRuntime, ahead: Traffic | undefined, ctx: 
   const progress = clamp01(racer.distanceM / setup.raceDistanceM);
 
   // --- 3. Personality overlay -------------------------------------------
-  // Computed first because effort feeds the power-limited speed below.
+  // Deciding to go comes first, because an attack changes the effort below and
+  // because it is a decision about the road ahead rather than about this
+  // instant. Nothing is emitted when a racer commits: whether the move actually
+  // opens a gap is the ground truth, and `groups.ts` reports that when it
+  // happens — the same reason an overtake is logged on the swap and not on the
+  // attempt.
+  if (toggles.tactics) considerAttack(racer, bunch, nodeIndex, progress, ctx);
+
+  // Computed after, because effort feeds the power-limited speed below.
   const effort = computeEffort(racer, ctx, progress);
 
   // --- 1. Target speed: the power-limited term --------------------------
@@ -98,17 +112,49 @@ export const tickRacer = (racer: RacerRuntime, ahead: Traffic | undefined, ctx: 
   const committedToPass = ctx.elapsedS < racer.passingUntilS;
 
   let dirtyAirGripLoss = 0;
-  if (toggles.draft && ahead !== undefined) {
-    if (ahead.gapS <= TUNING.draft.maxGapS) {
-      const proximity = 1 - ahead.gapS / TUNING.draft.maxGapS;
+  if (toggles.draft) {
+    // How much air is being broken for this racer, in wheels. Two sources, and
+    // they add:
+    //
+    //   The wheels immediately ahead — the classic pairwise tow, scaled by how
+    //   close this racer actually is to the one in front.
+    //
+    //   The turns their group shares out. Nobody stays on the front of a bunch;
+    //   they rotate, and averaged over any length of road that makes the *group*
+    //   more efficient than any of its members riding alone — including whoever
+    //   happens to be leading it at this instant. Without this term the racer on
+    //   the front is modelled as a solo rider and the bunch can never sustain
+    //   more than its least sheltered member's pace.
+    //
+    // Additive, and with the rotation term much the smaller of the two, because
+    // the difference between the racer on the front and the racers behind them
+    // is load-bearing: it is the only thing that makes a follower faster than a
+    // leader, and therefore the only thing that ever closes a gap. Taking the
+    // larger of the two instead — which is what this did first — hands the
+    // leader the same shelter as everyone else, nobody has a reason to catch
+    // anybody, and a peloton dissolves into individuals within ten minutes.
+    const wheelDepth =
+      ahead !== undefined && bunch.shelterDepth > 0
+        ? bunch.shelterDepth * (1 - ahead.gapS / TUNING.draft.maxGapS)
+        : 0;
+    const rawDepth = wheelDepth + (bunch.groupSize - 1) * TUNING.draft.rotationShare;
+
+    if (rawDepth > 0) {
       const awareness = lerp(
         TUNING.draft.minAwarenessFraction,
         1,
         racer.traits.draftAwareness,
       );
-      powerMs *= 1 + TUNING.draft.maxGainFraction * vehicle.draftBenefit * proximity * awareness;
+      // Saturating in depth, so the second wheel is worth far more than the
+      // twentieth. In a crosswind the shelter runs out at the edge of the road
+      // instead, however many riders are nominally ahead.
+      const depth = toggles.wind ? echelonDepth(rawDepth, nodeIndex, ctx) : rawDepth;
+      const shelter = depth / (depth + TUNING.draft.shelterHalfDepth);
+      powerMs *= 1 + TUNING.draft.maxGainFraction * vehicle.draftBenefit * awareness * shelter;
     }
+
     if (
+      ahead !== undefined &&
       ahead.gapS <= TUNING.draft.dirtyAirGapS &&
       !(committedToPass && TUNING.traffic.clearsDirtyAirWhilePassing)
     ) {
@@ -143,19 +189,38 @@ export const tickRacer = (racer: RacerRuntime, ahead: Traffic | undefined, ctx: 
     : 1;
   const cornerMs = nominalCornerMs * riskScale;
 
-  const cleanAirMs = Math.min(powerMs, cornerMs);
-  let targetMs = cleanAirMs;
+  // The pace this racer would ride if nobody were setting one for them. Not
+  // "clean air" — the shelter they are getting is already in it.
+  const ownPaceMs = Math.min(powerMs, cornerMs);
+  let targetMs = ownPaceMs;
+
+  // --- 3b. The bunch -----------------------------------------------------
+  // A group has a pace, and it is not usually yours. Only the costly direction
+  // is a speed: a group faster than you drags you above your own limit here,
+  // while a group slower than you saves you further down, in `deliveredEffort`,
+  // as reservoir you did not spend. See `holdGroupPace`.
+  //
+  // Applies to the racer on the front as much as to anyone else — a rider
+  // leading a bunch is riding the bunch's pace, not their own.
+  if (toggles.bunch && bunch.groupSize > 1) {
+    targetMs = holdGroupPace(racer, ownPaceMs, bunch.groupPaceMs, ctx);
+  }
 
   // --- 4. Traffic --------------------------------------------------------
   if (toggles.traffic && ahead !== undefined) {
-    targetMs = resolveTraffic(racer, ahead, targetMs, nodeIndex, progress, ctx);
+    targetMs = resolveTraffic(racer, ahead, targetMs, ownPaceMs, nodeIndex, progress, ctx);
   }
 
-  // How much of their pace the racer is actually getting to use. Held up
+  // How much of their pace the racer is actually getting to use, and the reason
+  // the ratio is deliberately not capped at 1 in either direction. Held up
   // behind someone slower, a racer is not working as hard as their effort
-  // number says, and should not be burning stamina or fuel as if they were.
-  const deliveredEffort =
-    cleanAirMs > 0 ? effort * Math.min(1, targetMs / cleanAirMs) : effort;
+  // number says and should not burn stamina as if they were. Hanging on to a
+  // group riding faster than them, they are working *harder* than it says — and
+  // since the drain scales with the square of that ratio, a rider who spends an
+  // hour clinging to a bunch above their level empties themselves and comes off.
+  // That is the entire mechanism by which a peloton drops people, and it is this
+  // one line rather than a rule anywhere else.
+  const deliveredEffort = ownPaceMs > 0 ? effort * (targetMs / ownPaceMs) : effort;
 
   // --- 5. Incidents ------------------------------------------------------
   if (toggles.incidents) {
@@ -210,6 +275,12 @@ const computeEffort = (racer: RacerRuntime, ctx: TickContext, progress: number):
       }
     }
   }
+
+  // A committed attack is a dig above whatever the pacing curve had planned.
+  // Deliberately a modest number: the expensive part of going clear is not the
+  // effort, it is leaving the shelter, and that cost applies itself the moment
+  // the racer is on the front with nobody left to hide behind.
+  if (ctx.elapsedS < racer.attackingUntilS) effort *= 1 + TUNING.tactics.attackEffortBoost;
 
   if (ctx.elapsedS < racer.rattledUntilS) {
     // Composure is what gets you back on the pace after a moment.
@@ -282,6 +353,140 @@ const weatherGripScale = (conditions: WeatherConditions, weatherShield: number):
 };
 
 // ---------------------------------------------------------------------------
+// Step 3b: the bunch
+// ---------------------------------------------------------------------------
+
+/**
+ * The pace a racer actually rides at, given the group they are in: hanging on.
+ *
+ * Called for every member of a group of two or more, the racer on the front
+ * included. `groupPaceMs` is an average over the group rather than the leader's
+ * own speed, so there is no member for whom the number is trivially their own —
+ * see `bunch.ts` for why it has to be an average.
+ *
+ * Only the *costly* half of group riding lives here, and that asymmetry is
+ * deliberate. Damping a racer down toward a slower group's average was tried and
+ * removed: it reads well and it is wrong twice over. It stops a follower ever
+ * being quicker than the rider in front, so nothing in the field ever closes a
+ * gap and a peloton ratchets apart into individuals; and it double-counts, since
+ * the traffic model already refuses to let a racer ride through the one ahead of
+ * them. The saving from sitting in a slow group is real, but it is not a speed —
+ * it is the reduced effort of being held to someone else's pace, which
+ * `deliveredEffort` already books by draining less of the reservoir.
+ */
+const holdGroupPace = (
+  racer: RacerRuntime,
+  ownPaceMs: number,
+  groupPaceMs: number,
+  ctx: TickContext,
+): number => {
+  if (groupPaceMs <= ownPaceMs) return ownPaceMs;
+
+  // The group is going faster than you can. You hold the wheel anyway, but only
+  // so far past your own limit — and less of that the emptier you are, which is
+  // what makes a long day in a fast bunch end with you off the back rather than
+  // with you holding it forever.
+  const fuel = ctx.toggles.endurance ? racer.reservoir : 1;
+  const headroom = TUNING.bunch.hangOnHeadroom * lerp(TUNING.bunch.hangOnEmptyScale, 1, fuel);
+  const ceilingMs = ownPaceMs * (1 + headroom);
+  return groupPaceMs < ceilingMs ? groupPaceMs : ceilingMs;
+};
+
+/**
+ * Shelter depth after the crosswind has had its say.
+ *
+ * A bunch sheltering itself in still air is a column; in a crosswind the usable
+ * air moves diagonally across the road and runs out at the gutter. Only as many
+ * riders as the road is wide get anything, and the rider immediately past the
+ * end of that echelon is in the gutter — riding alone, however many wheels are
+ * nominally ahead of them. Behind that a second echelon forms, and so on down
+ * the road.
+ *
+ * That is what the remainder expresses: a racer's depth is counted from the
+ * start of *their* echelon rather than from the front of the field. Rather than
+ * modelling lateral position — the sim is 1D along the route and must stay that
+ * way — the wind is allowed to reach in and reset the depth that counts.
+ *
+ * Simply capping the depth was tried first and is almost a no-op, which is worth
+ * recording because it looks so reasonable. The shelter curve saturates, so
+ * holding a rider at eight wheels instead of eleven moves their tow by well
+ * under a percent, and a full crosswind cost a twenty-rider bunch less time than
+ * the seed-to-seed noise. Being caught out behind the split has to actually
+ * hurt, or the echelon is decoration.
+ *
+ * The effect is interpolated in with the strength of the crosswind rather than
+ * switched on, so a wind getting up progressively strings a field out instead of
+ * guillotining it.
+ */
+const echelonDepth = (depth: number, nodeIndex: number, ctx: TickContext): number => {
+  // The same two precomputed heading components as the headwind dot product,
+  // crossed rather than dotted. Sign is irrelevant — a crosswind from either
+  // side does the same thing.
+  const cross =
+    ctx.windEast * (ctx.profile.headingNorth[nodeIndex] as number) -
+    ctx.windNorth * (ctx.profile.headingEast[nodeIndex] as number);
+  const crossMs = cross < 0 ? -cross : cross;
+
+  const severity = clamp01(
+    (crossMs - TUNING.draft.echelonOnsetMs) /
+      Math.max(TUNING.draft.echelonFullMs - TUNING.draft.echelonOnsetMs, 1e-6),
+  );
+  if (severity <= 0) return depth;
+
+  const capacity = Math.max(
+    1,
+    (ctx.profile.widthInVehicles[nodeIndex] as number) * TUNING.draft.echelonRidersPerWidth,
+  );
+  if (depth <= capacity) return depth;
+
+  // Depth within this racer's own echelon. `%` on doubles is exactly specified,
+  // so this stays as reproducible as the rest of the tick.
+  const inEchelon = depth % capacity;
+  return depth + (inEchelon - depth) * severity;
+};
+
+/**
+ * Deciding to go.
+ *
+ * Reads the course sweep through `profile.attackAppeal`, so a racer is far more
+ * likely to commit at the foot of a climb or on the approach to a pinch point
+ * than on an open straight — which is the difference between attacks happening
+ * and attacks mattering. Personality decides who: `aggression` throughout,
+ * `ambition` only once the race is late enough for a low-percentage move to be
+ * worth anything, exactly as the traffic model reads them.
+ */
+const considerAttack = (
+  racer: RacerRuntime,
+  bunch: BunchState,
+  nodeIndex: number,
+  progress: number,
+  ctx: TickContext,
+): void => {
+  if (ctx.elapsedS < racer.attackingUntilS || ctx.elapsedS < racer.attackReadyAtS) return;
+  // A racer alone on the road, or already on the front of their group, is
+  // doing the only thing available to them. There is nothing to attack from.
+  if (bunch.onFront || bunch.groupSize < 2) return;
+  if (ctx.toggles.endurance && racer.reservoir < TUNING.tactics.minReservoir) return;
+
+  const traits = racer.traits;
+  const lateness = clamp01(
+    (progress - TUNING.traffic.ambitionEngagesAtProgress) /
+      Math.max(1 - TUNING.traffic.ambitionEngagesAtProgress, 1e-6),
+  );
+  const eagerness = clamp01(traits.aggression * 0.5 + traits.ambition * lateness * 0.5);
+
+  const chance =
+    TUNING.tactics.baseAttackPerTick *
+    lerp(TUNING.tactics.minAttackMultiplier, TUNING.tactics.maxAttackMultiplier, eagerness) *
+    (1 + TUNING.tactics.selectionAppealBonus * (ctx.profile.attackAppeal[nodeIndex] as number));
+
+  if (!racer.rng.bool(chance)) return;
+
+  racer.attackingUntilS = ctx.elapsedS + TUNING.tactics.attackDurationS;
+  racer.attackReadyAtS = racer.attackingUntilS + TUNING.tactics.cooldownS;
+};
+
+// ---------------------------------------------------------------------------
 // Step 4: traffic
 // ---------------------------------------------------------------------------
 
@@ -289,6 +494,7 @@ const resolveTraffic = (
   racer: RacerRuntime,
   ahead: Traffic,
   targetMs: number,
+  ownPaceMs: number,
   nodeIndex: number,
   progress: number,
   ctx: TickContext,
@@ -296,8 +502,15 @@ const resolveTraffic = (
   // Track the pace advantage even outside the closing distance, so a racer who
   // arrives on the gearbox of the car ahead already knows whether they are
   // genuinely quicker or just briefly better placed on the lap.
+  //
+  // Measured against `ownPaceMs` rather than against the target, because the
+  // question is whether this racer is quicker — and a racer content to sit in
+  // has just damped their own target toward the group's. Reading the damped
+  // number would mean a patient rider could never register that they had the
+  // legs to go, which is precisely backwards: sitting in is a choice made *by*
+  // someone who knows they are faster.
   const smoothing = TICK_SECONDS / TUNING.traffic.paceAdvantageSmoothingS;
-  racer.paceAdvantageMs += (targetMs - ahead.racer.speedMs - racer.paceAdvantageMs) * smoothing;
+  racer.paceAdvantageMs += (ownPaceMs - ahead.racer.speedMs - racer.paceAdvantageMs) * smoothing;
 
   if (ahead.gapM > TUNING.traffic.closingDistanceM) return targetMs;
 

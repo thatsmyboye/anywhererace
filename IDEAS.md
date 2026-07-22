@@ -20,37 +20,6 @@ simplifications, not oversights.
 
 ## Good v2 candidates
 
-**A peloton that actually behaves like one.** The *observational* half of this is
-built: `packages/sim/src/groups.ts` reads which racers are riding together and
-emits attacks, bridges, splits and catches, and the course sweep
-(`packages/track/src/separation.ts`) already marks the climbs, pinches and
-cobbled sectors where a field would plausibly come apart. Neither of them
-touches racer behavior, which is exactly why they could ship without moving a
-determinism golden.
-
-The missing half is the tick reading any of it. Today a racer only knows about
-the one racer directly ahead, so a bunch is an emergent traffic queue rather than
-a thing racers are *in*: nobody shelters in the middle of a group, nobody takes a
-turn on the front, and nobody gets dropped on a climb because the group's pace is
-above their own. What would need to change:
-
-- Drafting would have to become group-shaped rather than pairwise. A rider
-  twentieth in a bunch is sheltered by the whole bunch, not by the wheel in front.
-- A group needs a collective pace, and riders need to hold it above or below
-  their own sustainable effort — being in a group should cost you when it is
-  faster than you and save you when it is slower.
-- Racers would need to read `separationPoints` ahead of them, and personality
-  would decide who attacks on the climb and who sits in. `aggression`,
-  `ambition` and `pacing` are the natural hooks and already exist.
-- Echelons, for the `exposed` stretches. The wind model is directional per node
-  already, so the physics is there; what is missing is lateral group structure.
-
-This is a large change and it moves every result, so it wants its own branch,
-regenerated goldens, and a `SIM_VERSION` bump. Worth noting that the sanity
-table would need new rows: a bunch race that behaves like one should produce
-much tighter finishing times than the current model does.
-
-
 **Mixed vehicle classes in one race.** The sim is closer to this than it looks:
 `VehicleClass` is already per-racer data rather than per-race, and the tick
 reads it per racer. What would need work is the corner-speed and braking profile
@@ -72,6 +41,41 @@ into a racer.
 tick already has.
 
 **3D terrain view.** The DEM is already fetched and baked per node.
+
+---
+
+## Left over from the peloton change
+
+The peloton entry that used to head the v2 list is built — see "Riding in a
+bunch" in CLAUDE.md. Four things it turned up and did not do:
+
+**Rotation on the front is averaged, not simulated.** Every member of a group
+gets the same `rotationShare` credit for turns shared out, which is a stand-in
+for riders actually taking pulls and swinging off. It gets the aggregate right —
+a bunch rides faster than any of its members could alone — but it means nobody
+is ever individually *on the front doing the work*, so a rider cannot be worn
+down by having spent the race there, and a team cannot bury itself for a leader.
+Modelling the rotation properly needs a notion of whose turn it is, which is the
+first thing in the sim that would look like tactics between racers rather than
+within one.
+
+**Attacks are a roll, not a plan.** `considerAttack` reads the road ahead and
+the racer's own traits, and nothing else. It cannot see that the race is already
+up the road, that the rider is the only one left who can chase, or that three of
+their rivals just went. Reading the *field* as well as the road is the natural
+next increment and `bunch.ts` already computes most of what it would need.
+
+**The echelon has no lateral truth to it.** It is expressed as a reset of
+shelter depth, which produces the right outcome — the riders past the width of
+the road get nothing and the field strings out — without any rider ever having a
+position across the road. That is deliberate, since the sim is 1D along the
+route and should stay that way, but it does mean the map cannot draw an echelon,
+and drawing one is most of what makes them legible to a viewer.
+
+**A dropped rider does not know they are dropped.** They ride their own pace and
+the gap grows. Real riders sit up, or chase, or wait for the next group back;
+which of those they do is exactly the sort of thing `composure` and `ambition`
+are for.
 
 ---
 

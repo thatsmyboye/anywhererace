@@ -51,6 +51,20 @@ export type TrackProfile = {
 
   /** Per node, usable width expressed in vehicle widths. */
   readonly widthInVehicles: Float64Array;
+
+  /**
+   * Per node, how attractive the road just here is to attack on: 0 to 1, taken
+   * from the severity of the nearest separation point the racer is approaching
+   * or already inside.
+   *
+   * This is the course sweep — climbs, pinch points, technical sections, rough
+   * surfaces — flattened into one number per node so the tick can read it with a
+   * single array index instead of searching a list of spans every tick for every
+   * racer. All zero on a course that predates the sweep, or one the sweep found
+   * nothing on, which correctly means "no reason to go here rather than there"
+   * in both cases.
+   */
+  readonly attackAppeal: Float64Array;
 };
 
 /**
@@ -123,7 +137,59 @@ export const buildTrackProfile = (track: Track, vehicle: VehicleClass): TrackPro
     headingEast,
     surfaceSpeedScale,
     widthInVehicles,
+    attackAppeal: buildAttackAppeal(track),
   };
+};
+
+/**
+ * Flatten the course sweep into a per-node appeal.
+ *
+ * A node is appealing if it is inside a separation point, or within
+ * `tactics.approachM` of the start of one — a rider lines an attack up at the
+ * foot of the climb, not halfway up it. Where two points overlap the stronger
+ * wins, because a racer picking a place to go picks the hardest thing in front
+ * of them, not the sum of everything nearby.
+ *
+ * Weighting the approach below the feature itself was considered and dropped:
+ * it needs a decay constant to justify and it changes nothing a viewer could
+ * see, since both are the same climb from the racer's point of view.
+ *
+ * Runs once per race over (points x nodes), with the point count capped by the
+ * sweep itself, so this is a few tens of thousands of comparisons before the
+ * first tick and none after it.
+ */
+const buildAttackAppeal = (track: Track): Float64Array => {
+  const nodes = track.nodes;
+  const appeal = new Float64Array(nodes.length);
+  const points = track.separationPoints;
+  // Absent and empty are different things — a course that predates the sweep
+  // versus one the sweep cleared — but not to a racer deciding where to attack.
+  // Both mean there is nowhere in particular to go.
+  if (points === undefined || points.length === 0) return appeal;
+
+  const lapM = track.lengthMeters;
+  const wraps = track.mode === 'circuit';
+
+  for (const point of points) {
+    const fromM = point.startM - TUNING.tactics.approachM;
+    // `endM` may already exceed the lap length: that is how the sweep expresses
+    // a feature that straddles a circuit's start line.
+    const spanM = point.endM - fromM;
+    if (spanM <= 0) continue;
+
+    for (let i = 0; i < nodes.length; i++) {
+      const distanceM = (nodes[i] as TrackNode).distance;
+      let offsetM = distanceM - fromM;
+      if (wraps) {
+        offsetM %= lapM;
+        if (offsetM < 0) offsetM += lapM;
+      }
+      if (offsetM < 0 || offsetM > spanM) continue;
+      if (point.severity > (appeal[i] as number)) appeal[i] = point.severity;
+    }
+  }
+
+  return appeal;
 };
 
 /**
