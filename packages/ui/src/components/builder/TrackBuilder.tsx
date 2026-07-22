@@ -4,12 +4,14 @@ import type {
   GeocodingProvider,
   LatLng,
   Place,
+  RoutingErrorKind,
   RoutingProfile,
   RoutingProvider,
   Track,
   TrackMode,
 } from '@anywhererace/core';
 import { ZOOM_FOR_KIND } from '@anywhererace/core';
+import type { LegalLoopError, LegalLoopFix } from '@anywhererace/track';
 import { BuilderMap } from './BuilderMap';
 import type { MapFocus } from './BuilderMap';
 import { ElevationProfile } from './ElevationProfile';
@@ -191,6 +193,15 @@ export const TrackBuilder = ({
           onRemove={actions.removeWaypoint}
         />
 
+        {builder.failedLegs.length === 0 ? null : (
+          <LegalLoopHelper
+            failed={builder.failedLegs}
+            searching={builder.searching}
+            onSearch={actions.findLegalLoop}
+            units={units}
+          />
+        )}
+
         <div className="flex gap-1">
           <button type="button" onClick={actions.undo} disabled={!builder.canUndo} className={ghostButton}>
             Undo
@@ -270,6 +281,95 @@ export const TrackBuilder = ({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+};
+
+/**
+ * The "find nearest legal loop" helper CLAUDE.md asks for.
+ *
+ * Only appears when a leg will not route, because until then there is nothing
+ * to find.
+ *
+ * The explanation is chosen from what the router actually said. A one-way
+ * network is the case CLAUDE.md describes and the most interesting one, but it
+ * is not the only way a leg fails, and telling a user their problem is a
+ * one-way street when their waypoint is simply nowhere near a road sends them
+ * looking in the wrong place. A user who understands *why* their block will not
+ * close can usually fix it faster than the search can.
+ *
+ * Every outcome is reported, including the two that are not successes. A
+ * search that exhausted its budget and a router that stopped answering mean
+ * completely different things — the first says "not near here", the second
+ * says nothing at all about the loop — and collapsing them into "could not
+ * find a loop" would tell the user their route is impossible when it is not.
+ */
+const BREAK_CAUSE: Record<RoutingErrorKind, string> = {
+  'illegal-direction':
+    'On a one-way network a loop has to run in a single direction, so a block can be three-quarters possible and still not close.',
+  'point-not-snappable':
+    'A waypoint is too far from any road or path for the router to start from.',
+  'no-route': 'There is no legal way to get between these two points on this profile.',
+  'unsupported-profile': 'The router does not support this travel profile.',
+  'provider-unavailable':
+    'The routing service is not answering, so this may not be a problem with your route at all.',
+};
+
+const LegalLoopHelper = ({
+  failed,
+  searching,
+  onSearch,
+  units,
+}: {
+  failed: readonly BuilderLeg[];
+  searching: { tried: number; budget: number } | undefined;
+  onSearch: () => Promise<{ fix: LegalLoopFix } | { error: LegalLoopError }>;
+  units: ReturnType<typeof useUnits>;
+}) => {
+  const [outcome, setOutcome] = useState<string | undefined>(undefined);
+  const breaks = failed.length;
+
+  // The first failure's kind, which is the right one to explain: they are
+  // almost always the same cause, and leading with a list of maybes helps
+  // nobody.
+  const kind = failed[0]?.status.state === 'failed' ? failed[0].status.error.kind : undefined;
+  const cause = kind === undefined ? '' : BREAK_CAUSE[kind];
+
+  const run = useCallback(() => {
+    setOutcome(undefined);
+    void onSearch().then((result) => {
+      if ('error' in result) {
+        setOutcome(result.error.message);
+        return;
+      }
+      const { waypointIndex, movedByMeters, remainingBreaks } = result.fix;
+      setOutcome(
+        `Moved waypoint ${waypointIndex + 1} by ${units.shortDistance(movedByMeters)}.` +
+          (remainingBreaks === 0
+            ? ' The loop closes. Undo puts it back.'
+            : ` ${remainingBreaks} more leg${remainingBreaks > 1 ? 's' : ''} still will not route — run it again.`),
+      );
+    });
+  }, [onSearch, units]);
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded border border-[#ffb020]/40 bg-[#ffb020]/10 px-2 py-2">
+      <p className="text-[11px] leading-snug text-[#ffb020]">
+        {breaks === 1 ? 'One leg will not route' : `${breaks} legs will not route`}. {cause}
+      </p>
+      <button
+        type="button"
+        onClick={run}
+        disabled={searching !== undefined}
+        className="rounded bg-[#ffb020] px-2 py-1 text-xs font-semibold text-[#0b0e13] transition-colors hover:bg-[#ffc451] disabled:opacity-60"
+      >
+        {searching === undefined
+          ? 'Find the nearest legal loop'
+          : `Searching… ${searching.tried}/${searching.budget}`}
+      </button>
+      {outcome === undefined ? null : (
+        <p className="text-[11px] leading-snug text-[#e6ebf2]">{outcome}</p>
+      )}
     </div>
   );
 };

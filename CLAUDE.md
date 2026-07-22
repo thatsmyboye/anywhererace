@@ -220,9 +220,21 @@ type RoutingProfile =
 
 1. **Circuits get much harder.** A one-way network means a closed loop must be
    traversable in a single direction. A user who drops four corners of a city block may
-   find three of the four streets run the wrong way. The builder must route each leg as
-   the user places it, show failures immediately at the offending leg, and offer a
-   "find nearest legal loop" helper rather than failing silently at save time.
+   find three of the four streets run the wrong way. The builder routes each leg as the
+   user places it, shows failures at the offending leg, and offers the "find nearest
+   legal loop" helper rather than failing silently at save time.
+
+   The helper lives in `packages/track/src/legalLoop.ts` and is a bounded spiral, not a
+   solver: it nudges the endpoints of a broken leg outward ring by ring, nearest first,
+   and gives up inside a fixed request budget. Every candidate costs a call to a free
+   shared router, so exhaustiveness is not on offer — and *nearest first* is
+   load-bearing, since a helper that silently relocated a corner three hundred meters
+   to save two requests would not be a helper. Three things it must keep doing: report
+   an outage as an outage rather than as "no such loop"; say how many breaks a single
+   move could not reach, because moving one waypoint only fixes the legs that touch it;
+   and apply the move through the ordinary edit path so Ctrl+Z puts it back. The panel's
+   explanation is chosen from the router's own error kind — blaming a one-way street for
+   a waypoint that is nowhere near a road sends the user looking in the wrong place.
 
 2. **Profile is chosen at track-build time, vehicle at race-setup time.** These can
    conflict. Store `routingProfile` on the track; at race setup, filter the vehicle list

@@ -108,11 +108,13 @@ two would say how good that prediction was.
 **Ghost replay against a previous race on the same track.** Determinism makes
 this nearly free — two seeds, same track, render both.
 
-**A "find nearest legal loop" helper** for circuit building on one-way networks.
-CLAUDE.md asks for this in the builder. Now that a real router is wired up this
-is finally tractable: Valhalla reports an unroutable leg distinctly from an
-outage, so the builder already knows *which* corner is impossible — the missing
-piece is searching nearby positions for one that closes the loop.
+**A wider legal-loop search.** The helper that ships spirals out to 180m from
+the endpoints of a broken leg and gives up, because every candidate costs a
+request to a free shared router and a sequential search of sixty of them already
+takes the better part of a minute. Valhalla's `sources_to_targets` matrix
+endpoint would answer a whole ring in one request, which would make a much wider
+and finer search affordable — worth doing if the helper turns out to give up
+more often than it succeeds.
 
 **Insert a waypoint into an existing leg.** Right now a waypoint can only be
 appended, so refining the middle of a long route means clearing and starting
