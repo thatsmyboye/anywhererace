@@ -62,7 +62,7 @@ Read these before writing any code. Violating them causes rework.
 | Map render | MapLibre GL JS | Free, vector tiles, no Mapbox billing |
 | Tiles | Protomaps or MapTiler free tier | Swappable behind `TileProvider` |
 | Routing / snap-to-route | **Valhalla** (self-hosted or FOSSGIS public) | Behind `RoutingProvider` interface. Chosen over OSRM because we need multiple travel profiles *and* turn restrictions in one engine — see "Routing profiles" below |
-| Elevation | Open-Topo-Data / OpenTopoData SRTM | Cached per track, never re-fetched |
+| Elevation | **Open-Meteo elevation** (Copernicus GLO-90) | Cached per track, never re-fetched. Open-Topo-Data's SRTM 30m is the better dataset and sends no CORS headers, so it cannot be called from a browser at all — see `openmeteo-elevation.ts` |
 | Weather | Open-Meteo | Free, no key, forecast + historical |
 | Persistence | IndexedDB (Dexie) local-first; Supabase optional for sync/sharing | Sim must work fully offline once a track is saved |
 | Testing | Vitest | Determinism golden tests are mandatory |
@@ -570,7 +570,7 @@ All three are optional at runtime and each falls back independently:
 |---|---|---|
 | MapTiler (`VITE_MAPTILER_KEY`) | basemap | blank background, app still works |
 | Valhalla (FOSSGIS public) | snapping routes to real roads | synthetic geometry, flagged in the UI |
-| Open-Topo-Data | real gradients | synthetic hills, flagged in the UI |
+| Open-Meteo elevation | real gradients | synthetic hills, flagged in the UI |
 | Open-Meteo | the real forecast, baked at race creation | dry and still, flagged in the UI |
 
 Only MapTiler needs a key: put it in `apps/web/.env.local` (gitignored; see
@@ -582,6 +582,14 @@ two points" is the router doing its job — usually a one-way street — and it 
 shown to the user. Only an outage, a timeout or a rate limit degrades to the
 mock, and when it does, the track records which service was synthetic so the
 track list can say so.
+
+**Anything the browser calls has to send CORS headers, and curl will not tell
+you whether it does.** A service without them fails with a bare
+`TypeError: Failed to fetch` before the request leaves the page, which the
+fallback reads as an outage — correctly — and quietly serves mock data from then
+on. That is exactly how every track saved from this app came to have invented
+hills while the same request worked perfectly from a terminal. When adding or
+swapping a provider, test it from the page, not from a shell.
 
 ---
 

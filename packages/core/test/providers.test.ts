@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { decodePolyline, encodePolyline } from '../src/providers/polyline';
 import { createValhallaProvider } from '../src/providers/valhalla';
+import { createOpenMeteoElevationProvider } from '../src/providers/openmeteo-elevation';
 import { createOpenTopoDataProvider } from '../src/providers/opentopodata';
 import { withElevationFallback, withRoutingFallback, withWeatherFallback } from '../src/providers/fallback';
 import { createOpenMeteoProvider } from '../src/providers/openmeteo';
@@ -280,6 +281,119 @@ describe('Open-Topo-Data elevation provider', () => {
   it('returns immediately for an empty request', async () => {
     const fetchImpl = vi.fn();
     const provider = createOpenTopoDataProvider({ fetchImpl: fetchImpl as unknown as typeof fetch });
+    const result = await provider.lookup([]);
+    expect(result.ok).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The elevation provider the web app actually uses.
+ *
+ * Open-Topo-Data above is the better dataset and is unreachable from a browser:
+ * it sends no CORS headers, so every request from a page fails before it is
+ * sent, the fallback reads that as an outage, and every saved track gets
+ * synthetic hills. These tests cover the replacement, which is on a host the app
+ * already talks to for the forecast.
+ */
+describe('Open-Meteo elevation provider', () => {
+  it('returns one elevation per point, in order', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ elevation: [12.5, 18.25] }));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup([LONDON, { lat: 51.51, lng: -0.12 }]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([12.5, 18.25]);
+  });
+
+  it('sends latitudes and longitudes as parallel lists', async () => {
+    // The endpoint pairs them by index, so a provider that transposed or
+    // reordered them would return real elevations for the wrong places — which
+    // is far worse than failing, because nothing downstream could detect it.
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ elevation: [1, 2] }));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await provider.lookup([
+      { lat: 51.5, lng: -0.12 },
+      { lat: 52.5, lng: 13.4 },
+    ]);
+
+    const url = String(fetchImpl.mock.calls[0]?.[0]);
+    expect(url).toContain('latitude=51.5,52.5');
+    expect(url).toContain('longitude=-0.12,13.4');
+  });
+
+  it('reads a null elevation as sea level rather than failing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ elevation: [null, 3] }));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup([LONDON, LONDON]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual([0, 3]);
+  });
+
+  it('refuses a batch larger than the service allows', async () => {
+    const fetchImpl = vi.fn();
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup(new Array<LatLng>(101).fill(LONDON));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('rate-limited');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched number of samples instead of misaligning the track', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ elevation: [1] }));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup([LONDON, LONDON]);
+    expect(result.ok).toBe(false);
+  });
+
+  it('reports a rate limit as a rate limit, so the fallback can degrade', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('', { status: 429 }));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup([LONDON]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('rate-limited');
+  });
+
+  it('turns a thrown fetch into an error result rather than an exception', async () => {
+    // This is the shape a CORS failure arrives in: a bare TypeError from
+    // `fetch`, with no response to inspect.
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const result = await provider.lookup([LONDON]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('provider-unavailable');
+  });
+
+  it('returns immediately for an empty request', async () => {
+    const fetchImpl = vi.fn();
+    const provider = createOpenMeteoElevationProvider({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
     const result = await provider.lookup([]);
     expect(result.ok).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();

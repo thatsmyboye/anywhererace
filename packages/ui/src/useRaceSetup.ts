@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ISOTimestamp, Track, WeatherConditions, WeatherProvider, WeatherSpec } from '@anywhererace/core';
 import { DRY_STILL_CONDITIONS, centroidOf, createRng, kphToMs } from '@anywhererace/core';
 import type { GridOrder, RaceConfig, RacerSpec, VehicleClass } from '@anywhererace/sim';
@@ -49,6 +49,24 @@ const DURATION_SAFETY_FACTOR = 1.6;
 
 export const useRaceSetup = (options: UseRaceSetupOptions) => {
   const { track, weather, now = () => new Date() } = options;
+
+  /**
+   * The clock, held in a ref so it can never reach a dependency array.
+   *
+   * `now` defaults to a fresh arrow function, so its identity changes on every
+   * render. As a plain dependency of `refreshForecast` that made
+   * `refreshForecast` change every render, which made the effect that calls it
+   * fire every render, which called `setState`, which caused another render —
+   * an unbounded refetch loop.
+   *
+   * It was not a quiet one. It hammered Open-Meteo until the service
+   * rate-limited us and the provider fell back to dry-and-still, so the visible
+   * symptom was a real forecast appearing and then being silently replaced by
+   * invented weather a second later, with "Fetching..." stuck on for good. A
+   * user about to start a race would race whatever the loop had last written.
+   */
+  const nowRef = useRef(now);
+  nowRef.current = now;
 
   const allowedVehicles = useMemo(() => vehiclesForProfile(track.routingProfile), [track.routingProfile]);
   const blockedVehicles = useMemo(
@@ -137,12 +155,26 @@ export const useRaceSetup = (options: UseRaceSetupOptions) => {
 
   // --- weather -------------------------------------------------------------
 
+  /**
+   * Which fetch is the current one.
+   *
+   * Changing laps or vehicle changes how much forecast to ask for, so a user
+   * typing a lap count legitimately starts several requests in a second. Without
+   * a sequence number the slowest of them wins whenever it happens to land last,
+   * and the race is set up against a forecast for a duration the user has
+   * already changed.
+   */
+  const forecastSeq = useRef(0);
+
   const refreshForecast = useCallback(async () => {
     if (estimatedDurationS <= 0) return;
+    const seq = ++forecastSeq.current;
+    const isStale = (): boolean => forecastSeq.current !== seq;
+
     setFetchingForecast(true);
     setForecastError(undefined);
 
-    const fetchedAt = now().toISOString();
+    const fetchedAt = nowRef.current().toISOString();
     const at = centroidOf(track.nodes.length > 0 ? track.nodes : track.polyline);
     const start = startsAt ?? fetchedAt;
 
@@ -151,6 +183,8 @@ export const useRaceSetup = (options: UseRaceSetupOptions) => {
       startsAt: start,
       durationS: estimatedDurationS * DURATION_SAFETY_FACTOR,
     });
+
+    if (isStale()) return;
 
     if (!result.ok) {
       setForecast(undefined);
@@ -172,7 +206,7 @@ export const useRaceSetup = (options: UseRaceSetupOptions) => {
     });
     setForecastError(undefined);
     setFetchingForecast(false);
-  }, [weather, track, startsAt, estimatedDurationS, now]);
+  }, [weather, track, startsAt, estimatedDurationS]);
 
   useEffect(() => {
     if (weatherMode !== 'forecast') return;

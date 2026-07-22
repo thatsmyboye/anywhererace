@@ -3,8 +3,8 @@ import {
   createMockElevationProvider,
   createMockRoutingProvider,
   createMockWeatherProvider,
+  createOpenMeteoElevationProvider,
   createOpenMeteoProvider,
-  createOpenTopoDataProvider,
   createValhallaProvider,
   withElevationFallback,
   withRoutingFallback,
@@ -74,8 +74,12 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
     { onDegraded: onRoutingDegraded },
   );
 
+  // Open-Meteo rather than Open-Topo-Data, which is the better dataset but sends
+  // no CORS headers and so cannot be reached from a page at all. See
+  // `openmeteo-elevation.ts`: wiring the other one here meant every track saved
+  // from this app got synthetic hills and a banner explaining that it had.
   const elevation = withElevationFallback(
-    createOpenTopoDataProvider(),
+    createOpenMeteoElevationProvider(),
     createMockElevationProvider({ seed: 'fallback-dem' }),
     { onDegraded: onElevationDegraded },
   );

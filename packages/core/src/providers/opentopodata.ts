@@ -6,13 +6,25 @@ import type { ElevationError, ElevationProvider } from './elevation';
 /**
  * Open-Topo-Data, for real terrain.
  *
+ * **Not usable from a browser, and the web app does not wire it.** The public
+ * instance sends no `Access-Control-Allow-Origin` header, so a request from a
+ * page is blocked before it is sent and the fetch rejects with a bare "Failed to
+ * fetch". The elevation fallback reads that as an outage — correctly — and
+ * serves synthetic hills, so wiring this into the app silently gives every saved
+ * track invented terrain. It survived a long time precisely because the same
+ * request from curl or Node works perfectly. Use
+ * `createOpenMeteoElevationProvider` for anything that runs in a page.
+ *
+ * Kept because it is still the better dataset (SRTM 30m against Open-Meteo's
+ * GLO-90) and is fine from a server, the CLI, or a future proxy endpoint.
+ *
  * Gradient has to come from a DEM. OSM ways carry no height, and deriving it
  * from route geometry produces dead-flat trails and imaginary cliffs — which
  * matters most for exactly the classes where elevation is the whole story.
  *
- * The public instance allows 100 locations per call and 1000 calls a day, so
- * this is called once per track at bake time and the result is stored with the
- * track. It is never called again — not on replay, not on reload.
+ * The public instance allows 100 locations per call, 1000 calls a day, and — not
+ * documented in the same place — roughly one call per second, which a track bake
+ * exceeds in a burst. Anything calling this server-side needs to pace itself.
  */
 
 export type OpenTopoDataOptions = {
