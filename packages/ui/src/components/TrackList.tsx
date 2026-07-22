@@ -1,4 +1,5 @@
 import type { StoredRaceSummary, TrackSummary } from '@anywhererace/store';
+import { UnitToggle, useUnits } from '../units';
 
 /**
  * Saved tracks.
@@ -32,20 +33,26 @@ export const TrackList = ({
   onDelete,
   onReplay,
   onDeleteRace,
-}: TrackListProps) => (
+}: TrackListProps) => {
+  const units = useUnits();
+
+  return (
   <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-8 text-[#e6ebf2]">
     <header className="flex items-baseline justify-between">
       <div>
         <h1 className="text-xl font-semibold">AnywhereRace</h1>
         <p className="text-sm text-[#8d9bb0]">Draw a track on a real map, then watch it race.</p>
       </div>
-      <button
-        type="button"
-        onClick={onCreate}
-        className="rounded bg-[#4da3ff] px-3 py-2 text-sm font-semibold text-[#0b0e13] transition-colors hover:bg-[#6fb5ff]"
-      >
-        New track
-      </button>
+      <div className="flex items-center gap-2">
+        <UnitToggle className="self-center" />
+        <button
+          type="button"
+          onClick={onCreate}
+          className="rounded bg-[#4da3ff] px-3 py-2 text-sm font-semibold text-[#0b0e13] transition-colors hover:bg-[#6fb5ff]"
+        >
+          New track
+        </button>
+      </div>
     </header>
 
     {error === undefined ? null : (
@@ -82,7 +89,7 @@ export const TrackList = ({
                 )}
               </div>
               <p className="text-xs tabular-nums text-[#8d9bb0]">
-                {(track.lengthMeters / 1000).toFixed(2)} km · {track.mode} ·{' '}
+                {units.distance(track.lengthMeters)} · {track.mode} ·{' '}
                 {track.routingProfile} · saved {formatDate(track.updatedAt)}
               </p>
             </div>
@@ -159,7 +166,8 @@ export const TrackList = ({
       </section>
     )}
   </div>
-);
+  );
+};
 
 /**
  * What was synthetic, if anything.

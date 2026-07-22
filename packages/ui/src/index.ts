@@ -2,6 +2,8 @@
 // Depends on worker, track, sim and core; never the reverse.
 
 export * from './feed';
+export * from './units';
+export * from './separationCopy';
 export * from './palette';
 export * from './markers';
 export * from './useRaceClient';

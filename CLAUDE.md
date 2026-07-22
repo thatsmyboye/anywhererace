@@ -165,11 +165,11 @@ type SeparationPoint = {
   endM: number;          // always > startM; may exceed lap length if it wraps the line
   kind: SeparationKind;
   severity: number;      // 0-1, for ranking within one course only
-  detail: string;        // one line of UI copy
+  detail: SeparationDetail | string;  // the measurements; see below
 };
 ```
 
-Four rules govern it:
+Five rules govern it:
 
 1. **It is an observation about the road, not a prediction about a race.** It says where
    a field *could* come apart, never where one will. The sim does read it — `profile.ts`
@@ -194,6 +194,14 @@ Four rules govern it:
    sweep; empty means it was analyzed and the road is flat, wide and smooth. Never
    collapse the two — telling a user a course has no selection points when nobody ever
    looked is a lie the UI can easily tell by accident.
+5. **It emits measurements, not prose.** `detail` carries the numbers behind the point —
+   mean gradient and height gained, tightest width, feature count, surface — and the
+   sentence is assembled at render time by `describeSeparation` in `packages/ui`. A
+   course is baked once and has to read correctly for someone in miles and someone in
+   kilometers, which a string frozen at bake time cannot do. The bare `string` arm is
+   the pre-toggle shape, still in browsers that saved a track before this changed;
+   those render verbatim, in the metric they were baked in, and nothing writes a new
+   one.
 
 ### Routing profiles and legality
 
@@ -639,6 +647,15 @@ swapping a provider, test it from the page, not from a shell.
 - US English spelling throughout, including in code identifiers and UI copy.
 - SI units internally (meters, m/s, seconds, kelvin-free celsius). Convert only at the
   UI boundary. Suffix ambiguous variables: `speedMs`, `distanceM`, `lapTimeS`.
+- **The reader picks metric or imperial; nothing else ever asks.** `UnitsProvider` in
+  `packages/ui/src/units.tsx` holds the choice, remembers it in `localStorage` and
+  defaults from the browser's locale; `useUnits()` hands back formatters already bound
+  to it. The formatters themselves live in `packages/core/src/units.ts`, which is the
+  only place a conversion factor may appear. Nothing upstream of a render branches on
+  the system — that is what keeps a race shared by a reader in miles byte-identical to
+  the same race opened by a reader in kilometers. A number that reaches the screen from
+  a store, a sim result or a bake must therefore arrive in SI and be formatted there,
+  never formatted earlier and carried as a string.
 - Named exports only. No default exports.
 - Errors are typed results in the sim (`Result<T, SimError>`); exceptions only at the
   app boundary.

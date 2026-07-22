@@ -5,6 +5,7 @@ import type { GridOrder, RaceConfig } from '@anywhererace/sim';
 import { getVehicleClass } from '@anywhererace/sim';
 import type { RosterPresetSummary } from '@anywhererace/store';
 import { useRaceSetup } from '../../useRaceSetup';
+import { UnitToggle, useUnits } from '../../units';
 import { RosterTable } from './RosterTable';
 import { SeparationPoints } from './SeparationPoints';
 import { WeatherPicker } from './WeatherPicker';
@@ -48,6 +49,7 @@ export const RaceSetup = ({
 }: RaceSetupProps) => {
   const setup = useRaceSetup({ track, weather });
   const { actions } = setup;
+  const units = useUnits();
   const [presetName, setPresetName] = useState('');
   const selectedFormat = getVehicleClass(setup.vehicleClassId)?.raceFormat ?? 'standard';
 
@@ -82,9 +84,10 @@ export const RaceSetup = ({
         <div className="min-w-0">
           <h1 className="truncate text-sm font-semibold">{track.name}</h1>
           <p className="text-xs tabular-nums text-[#8d9bb0]">
-            {(track.lengthMeters / 1000).toFixed(2)} km · {track.mode} · {track.routingProfile}
+            {units.distance(track.lengthMeters)} · {track.mode} · {track.routingProfile}
           </p>
         </div>
+        <UnitToggle className="ml-auto shrink-0" />
       </header>
 
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 overflow-y-auto p-5">
@@ -120,7 +123,7 @@ export const RaceSetup = ({
             <div className="flex flex-col gap-1">
               <span className={labelClass}>Distance</span>
               <span className="px-2 py-1.5 text-sm tabular-nums">
-                {(track.lengthMeters / 1000).toFixed(2)} km
+                {units.distance(track.lengthMeters)}
               </span>
             </div>
           )}
@@ -255,7 +258,7 @@ export const RaceSetup = ({
 
       <footer className="flex shrink-0 items-center gap-4 border-t border-[#2b3543] bg-[#161b24] px-5 py-3">
         <p className="text-xs tabular-nums text-[#8d9bb0]">
-          {(setup.raceDistanceM / 1000).toFixed(2)} km
+          {units.distance(setup.raceDistanceM)}
           <span className="mx-1.5 text-[#2b3543]">·</span>
           about {formatDurationS(setup.estimatedDurationS, 0)}
           <span className="mx-1.5 text-[#2b3543]">·</span>

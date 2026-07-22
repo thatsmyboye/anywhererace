@@ -4,6 +4,7 @@ import { BuilderMap } from './BuilderMap';
 import { ElevationProfile } from './ElevationProfile';
 import { useTrackBuilder } from '../../useTrackBuilder';
 import type { BuilderLeg } from '../../useTrackBuilder';
+import { UnitToggle, useUnits } from '../../units';
 
 /**
  * The track builder.
@@ -45,6 +46,7 @@ export const TrackBuilder = ({
 }: TrackBuilderProps) => {
   const builder = useTrackBuilder({ routing, elevation });
   const { actions } = builder;
+  const units = useUnits();
 
   // Keyboard undo/redo. Standard bindings, including the Windows-style
   // Ctrl+Y that a lot of people reach for.
@@ -83,11 +85,14 @@ export const TrackBuilder = ({
           <h1 className="text-sm font-semibold uppercase tracking-wider text-[#8d9bb0]">
             Track builder
           </h1>
-          {onCancel === undefined ? null : (
-            <button type="button" onClick={onCancel} className={ghostButton}>
-              Close
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <UnitToggle />
+            {onCancel === undefined ? null : (
+              <button type="button" onClick={onCancel} className={ghostButton}>
+                Close
+              </button>
+            )}
+          </div>
         </div>
 
         {degradedNotice === undefined ? null : (
@@ -170,9 +175,7 @@ export const TrackBuilder = ({
         <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-sm tabular-nums">
           <dt className="text-[#8d9bb0]">Length</dt>
           <dd className="text-right">
-            {builder.preview === undefined
-              ? '—'
-              : `${(builder.preview.lengthMeters / 1000).toFixed(2)} km`}
+            {builder.preview === undefined ? '—' : units.distance(builder.preview.lengthMeters)}
           </dd>
           <dt className="text-[#8d9bb0]">Corners</dt>
           <dd className="text-right">{builder.preview?.cornerCount ?? '—'}</dd>
@@ -180,7 +183,7 @@ export const TrackBuilder = ({
           <dd className="text-right">
             {builder.preview === undefined || !Number.isFinite(builder.preview.tightestRadiusM)
               ? '—'
-              : `${Math.round(builder.preview.tightestRadiusM)} m`}
+              : units.shortDistance(builder.preview.tightestRadiusM)}
           </dd>
         </dl>
 

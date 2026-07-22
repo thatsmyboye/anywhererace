@@ -1,5 +1,7 @@
+import { mToFt } from '@anywhererace/core';
 import type { TrackPreview } from '@anywhererace/track';
 import { THEME } from '../../palette';
+import { useUnits } from '../../units';
 
 /**
  * The elevation profile.
@@ -30,6 +32,9 @@ export const ElevationProfile = ({
   loading,
   height = DEFAULT_HEIGHT,
 }: ElevationProfileProps) => {
+  const units = useUnits();
+  const aboveSeaLevel = (meters: number): number =>
+    units.system === 'imperial' ? mToFt(meters) : meters;
   const samples = preview?.profile ?? [];
 
   if (samples.length < 2) {
@@ -69,18 +74,21 @@ export const ElevationProfile = ({
         height={height}
         className="block rounded border border-[#2b3543] bg-[#0b0e13]"
         role="img"
-        aria-label={`Elevation profile: ${Math.round(preview?.climbM ?? 0)} meters of climbing over ${(totalM / 1000).toFixed(2)} kilometers`}
+        aria-label={`Elevation profile: ${units.shortDistance(preview?.climbM ?? 0)} of climbing over ${units.distance(totalM)}`}
       >
         <path d={area} fill={THEME.accent} opacity={0.18} />
         <path d={line} fill="none" stroke={THEME.accent} strokeWidth={1.5} />
       </svg>
       <figcaption className="mt-1 flex justify-between text-[11px] tabular-nums text-[#8d9bb0]">
         <span>
-          <span className="text-[#3ddc97]">↑</span> {Math.round(preview?.climbM ?? 0)}m
-          <span className="ml-2 text-[#ffb020]">↓</span> {Math.round(preview?.descentM ?? 0)}m
+          <span className="text-[#3ddc97]">↑</span> {units.shortDistance(preview?.climbM ?? 0)}
+          <span className="ml-2 text-[#ffb020]">↓</span>{' '}
+          {units.shortDistance(preview?.descentM ?? 0)}
         </span>
+        {/* A range shares one unit — "340–512 m", not "340 m–512 m". */}
         <span>
-          {Math.round(low)}–{Math.round(high)}m
+          {Math.round(aboveSeaLevel(low))}–{Math.round(aboveSeaLevel(high))}{' '}
+          {units.system === 'imperial' ? 'ft' : 'm'}
         </span>
       </figcaption>
     </figure>
