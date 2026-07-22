@@ -116,10 +116,13 @@ endpoint would answer a whole ring in one request, which would make a much wider
 and finer search affordable — worth doing if the helper turns out to give up
 more often than it succeeds.
 
-**Insert a waypoint into an existing leg.** Right now a waypoint can only be
-appended, so refining the middle of a long route means clearing and starting
-again. Dragging a point off the route line to split a leg is the standard
-gesture and the leg model already supports it.
+**Dragging the route line itself**, rather than the handle at the middle of it.
+Insert handles ship, and they are the discoverable version — you can see where
+a waypoint would go before you commit to it. Grabbing the line anywhere along
+its length is the gesture people know from Google Maps, and it would want the
+line hit-tested under the cursor and the map's own drag suppressed for that
+gesture. Worth doing only if the midpoint handles turn out to feel restrictive
+on long legs.
 
 **Snap the drawn route to a saved track's start line.** Start and finish are
 currently pinned to the first waypoint; letting the user drag the line along the

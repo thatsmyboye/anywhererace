@@ -1,5 +1,11 @@
 import type { LatLng, Track, TrackNode } from '@anywhererace/core';
-import { bearingDeltaDeg, destinationPoint, interpolateLatLng, normalizeBearingDeg } from '@anywhererace/core';
+import {
+  bearingDeltaDeg,
+  cumulativeDistances,
+  destinationPoint,
+  interpolateLatLng,
+  normalizeBearingDeg,
+} from '@anywhererace/core';
 
 /**
  * Turning a racer's 1D position back into a point on the map.
@@ -17,6 +23,35 @@ export type TrackPosition = {
   bearing: number;
   /** Gradient at this point, signed. Handy for a climb indicator. */
   gradient: number;
+};
+
+/**
+ * The point half way along a polyline, measured by distance.
+ *
+ * By distance rather than by vertex count, because OSM vertex density is wildly
+ * uneven: the middle *vertex* of a routed leg is routinely a few meters from
+ * one of its ends, which would put the builder's insert handle somewhere the
+ * user would never look for it.
+ */
+export const midpointOfPolyline = (points: readonly LatLng[]): LatLng | undefined => {
+  if (points.length === 0) return undefined;
+  const first = points[0] as LatLng;
+  if (points.length === 1) return first;
+
+  const cumulative = cumulativeDistances(points);
+  const total = cumulative[cumulative.length - 1] as number;
+  if (total <= 0) return first;
+
+  const half = total / 2;
+  for (let i = 1; i < points.length; i++) {
+    const before = cumulative[i - 1] as number;
+    const after = cumulative[i] as number;
+    if (after < half) continue;
+    const span = after - before;
+    const t = span <= 0 ? 0 : (half - before) / span;
+    return interpolateLatLng(points[i - 1] as LatLng, points[i] as LatLng, t);
+  }
+  return points[points.length - 1] as LatLng;
 };
 
 /**

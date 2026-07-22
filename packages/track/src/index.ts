@@ -8,6 +8,7 @@ export * from './surface';
 export * from './bake';
 export * from './separation';
 export * from './build';
+export * from './legs';
 export * from './legalLoop';
 export * from './preview';
 export * from './position';

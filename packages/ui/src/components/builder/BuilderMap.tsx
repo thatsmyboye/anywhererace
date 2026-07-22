@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
 import type { LatLng, LatLngBounds } from '@anywhererace/core';
+import { interpolateLatLng } from '@anywhererace/core';
+import { insertIndexForLeg, midpointOfPolyline } from '@anywhererace/track';
 import { THEME } from '../../palette';
 import type { BuilderLeg } from '../../useTrackBuilder';
 
@@ -50,6 +52,8 @@ export type BuilderMapProps = {
   /** Move the camera here. Nothing drawn is affected. */
   focus?: MapFocus | undefined;
   onAddWaypoint: (point: LatLng) => void;
+  /** Put a new waypoint at `index`, splitting the leg it was dragged out of. */
+  onInsertWaypoint: (index: number, point: LatLng) => void;
   onMoveWaypoint: (index: number, point: LatLng) => void;
   onRemoveWaypoint: (index: number) => void;
 };
@@ -70,17 +74,24 @@ export const BuilderMap = ({
   initialZoom,
   focus,
   onAddWaypoint,
+  onInsertWaypoint,
   onMoveWaypoint,
   onRemoveWaypoint,
 }: BuilderMapProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const handleMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   // Handlers are read through refs so the map is built once and never rebuilt
   // just because a callback identity changed.
-  const handlers = useRef({ onAddWaypoint, onMoveWaypoint, onRemoveWaypoint });
-  handlers.current = { onAddWaypoint, onMoveWaypoint, onRemoveWaypoint };
+  const handlers = useRef({
+    onAddWaypoint,
+    onInsertWaypoint,
+    onMoveWaypoint,
+    onRemoveWaypoint,
+  });
+  handlers.current = { onAddWaypoint, onInsertWaypoint, onMoveWaypoint, onRemoveWaypoint };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -171,6 +182,59 @@ export const BuilderMap = ({
       markersRef.current = [];
     };
   }, [waypoints]);
+
+  // --- insert handles ------------------------------------------------------
+  /**
+   * One ghost handle at the middle of every leg. Dragging it off the line puts
+   * a new waypoint there and splits the leg in two, which is the standard
+   * gesture for editing the middle of a route and the reason a long route no
+   * longer has to be cleared and redrawn to change one corner of it.
+   *
+   * Keyed off `legs` rather than `waypoints` because the handle belongs on the
+   * *road*, not on the straight line between two pins — on anything but a
+   * dead-straight leg those are nowhere near each other.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined) return;
+
+    for (const marker of handleMarkersRef.current) marker.remove();
+    handleMarkersRef.current = legs.flatMap((leg) => {
+      const at = handlePosition(leg);
+      if (at === undefined) return [];
+
+      const insertIndex = insertIndexForLeg(leg, waypoints.length);
+
+      const element = insertHandleElement(leg.status.state === 'failed');
+      const marker = new maplibregl.Marker({ element, draggable: true })
+        .setLngLat([at.lng, at.lat])
+        .addTo(map);
+
+      // A click on the handle lands after `dragend` in most browsers, so a drag
+      // would otherwise insert twice — once where it was dropped and once back
+      // at the midpoint it started from.
+      let draggedAtMs = 0;
+      marker.on('dragend', () => {
+        draggedAtMs = Date.now();
+        const { lat, lng } = marker.getLngLat();
+        handlers.current.onInsertWaypoint(insertIndex, { lat, lng });
+      });
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (Date.now() - draggedAtMs < 250) return;
+        // Clicking without dragging pins the route where it already runs,
+        // which is how you stop a later edit from rerouting this stretch.
+        handlers.current.onInsertWaypoint(insertIndex, at);
+      });
+
+      return [marker];
+    });
+
+    return () => {
+      for (const marker of handleMarkersRef.current) marker.remove();
+      handleMarkersRef.current = [];
+    };
+  }, [legs, waypoints.length]);
 
   // --- route geometry ------------------------------------------------------
   useEffect(() => {
@@ -282,6 +346,55 @@ const failedGeoJSON = (legs: readonly BuilderLeg[]): FeatureCollection => ({
       : [],
   ),
 });
+
+/**
+ * Where a leg's insert handle goes.
+ *
+ * On the routed road where there is one. A leg that failed to route has no
+ * geometry, and its straight dashed line is the only thing on screen to grab —
+ * which is exactly when inserting a waypoint is most useful, since a waypoint
+ * dropped part way along is how a user routes around whatever is blocking it.
+ */
+const handlePosition = (leg: BuilderLeg): LatLng | undefined =>
+  leg.status.state === 'ok'
+    ? midpointOfPolyline(leg.status.leg.polyline)
+    : interpolateLatLng(leg.from, leg.to, 0.5);
+
+/**
+ * A ghost handle at the middle of a leg. Deliberately smaller and dimmer than
+ * a waypoint: it is not part of the route the user drew, it is somewhere they
+ * *could* put one, and it must not be mistaken for a corner that already
+ * exists.
+ */
+const insertHandleElement = (onFailedLeg: boolean): HTMLElement => {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.textContent = '+';
+  element.title = 'Drag to add a waypoint here and split this leg';
+  element.setAttribute('aria-label', 'Add a waypoint in the middle of this leg');
+  element.style.cssText = [
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'width:16px',
+    'height:16px',
+    'border-radius:50%',
+    'font:700 12px/1 system-ui,sans-serif',
+    'cursor:grab',
+    `background:${onFailedLeg ? THEME.danger : THEME.text}`,
+    `color:${THEME.background}`,
+    `border:2px solid ${THEME.background}`,
+    'opacity:0.55',
+    'padding:0',
+  ].join(';');
+  element.addEventListener('mouseenter', () => {
+    element.style.opacity = '1';
+  });
+  element.addEventListener('mouseleave', () => {
+    element.style.opacity = '0.55';
+  });
+  return element;
+};
 
 /**
  * A waypoint marker. Built by hand rather than with MapLibre's default pin so

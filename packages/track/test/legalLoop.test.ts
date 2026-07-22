@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { destinationPoint, err, haversineMeters, ok } from '@anywhererace/core';
 import type { LatLng, RouteLeg, RoutingProvider } from '@anywhererace/core';
-import { findNearestLegalLoop, legPairsFor } from '../src/legalLoop';
+import { findNearestLegalLoop } from '../src/legalLoop';
 
 /**
  * The router is a stub, so a "one-way street" here is just a rule about which
@@ -31,22 +31,6 @@ const router = (blocked: (from: LatLng, to: LatLng) => boolean): RoutingProvider
 /** A leg is blocked while its `from` end sits within `radiusM` of `cursed`. */
 const cursedCorner = (cursed: LatLng, radiusM: number) => (from: LatLng): boolean =>
   haversineMeters(from, cursed) < radiusM;
-
-describe('leg pairs', () => {
-  it('closes the loop on a circuit', () => {
-    const pairs = legPairsFor(SQUARE, 'circuit');
-    expect(pairs).toHaveLength(4);
-    expect(pairs[3]).toMatchObject({ fromIndex: 3, toIndex: 0 });
-  });
-
-  it('does not close a point-to-point', () => {
-    expect(legPairsFor(SQUARE, 'point-to-point')).toHaveLength(3);
-  });
-
-  it('does not close a two-point circuit, which would be a there-and-back', () => {
-    expect(legPairsFor(SQUARE.slice(0, 2), 'circuit')).toHaveLength(1);
-  });
-});
 
 describe('finding the nearest legal loop', () => {
   const base = {

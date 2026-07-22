@@ -6,6 +6,7 @@ import type {
   RoutingProvider,
   TrackMode,
 } from '@anywhererace/core';
+import { legPairsFor } from './legs';
 
 /**
  * "Find the nearest legal loop."
@@ -34,44 +35,6 @@ import type {
  *    impossible because a public service was rate-limiting us would be the
  *    exact lie the fallback rules elsewhere exist to prevent.
  */
-
-export type LegPair = {
-  fromIndex: number;
-  /** Wraps to 0 for a circuit's closing leg. */
-  toIndex: number;
-  from: LatLng;
-  to: LatLng;
-};
-
-/**
- * The legs of a route, in order.
- *
- * Lives here rather than in the builder's hook because it is track
- * construction, not React state, and because the loop search needs exactly the
- * same answer the builder is drawing.
- */
-export const legPairsFor = (waypoints: readonly LatLng[], mode: TrackMode): LegPair[] => {
-  const pairs: LegPair[] = [];
-  for (let i = 1; i < waypoints.length; i++) {
-    pairs.push({
-      fromIndex: i - 1,
-      toIndex: i,
-      from: waypoints[i - 1] as LatLng,
-      to: waypoints[i] as LatLng,
-    });
-  }
-  // The closing leg is where one-way networks bite: three sides of a block can
-  // route perfectly and the fourth be impossible in that direction.
-  if (mode === 'circuit' && waypoints.length > 2) {
-    pairs.push({
-      fromIndex: waypoints.length - 1,
-      toIndex: 0,
-      from: waypoints[waypoints.length - 1] as LatLng,
-      to: waypoints[0] as LatLng,
-    });
-  }
-  return pairs;
-};
 
 export type LoopSearchOptions = {
   /**

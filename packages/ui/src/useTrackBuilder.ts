@@ -160,6 +160,26 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
     [commit],
   );
 
+  /**
+   * Put a waypoint *between* two existing ones.
+   *
+   * Appending was the only way to build a route, so refining the middle of a
+   * long one meant clearing it and starting again. `index` is the position the
+   * new waypoint takes, so inserting into the leg from waypoint 2 to waypoint 3
+   * passes 3 — including the closing leg of a circuit, which inserts at the
+   * end because that is where the loop is reopened.
+   */
+  const insertWaypoint = useCallback(
+    (index: number, point: LatLng) =>
+      commit((current) => {
+        const at = Math.min(Math.max(index, 0), current.waypoints.length);
+        const waypoints = current.waypoints.slice();
+        waypoints.splice(at, 0, point);
+        return { ...current, waypoints };
+      }),
+    [commit],
+  );
+
   const removeWaypoint = useCallback(
     (index: number) =>
       commit((current) =>
@@ -432,6 +452,7 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
     canRedo: history.future.length > 0,
     actions: {
       addWaypoint,
+      insertWaypoint,
       moveWaypoint,
       removeWaypoint,
       setMode,

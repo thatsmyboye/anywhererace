@@ -252,6 +252,8 @@ export const TrackBuilder = ({
         </button>
         <p className="text-[11px] leading-snug text-[#8d9bb0]">
           Click the map to add a waypoint, drag one to move it, click a waypoint to remove it.
+          Drag the small handle in the middle of a leg to add a waypoint there instead of at
+          the end.
         </p>
       </aside>
 
@@ -265,6 +267,7 @@ export const TrackBuilder = ({
           initialZoom={initialZoom}
           focus={focus}
           onAddWaypoint={actions.addWaypoint}
+          onInsertWaypoint={actions.insertWaypoint}
           onMoveWaypoint={actions.moveWaypoint}
           onRemoveWaypoint={actions.removeWaypoint}
         />

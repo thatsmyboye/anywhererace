@@ -541,6 +541,14 @@ to be in-bunch shuffling with nothing worth showing among them.
    the right part of the world without panning an ocean; it moves the camera and
    does nothing else — no waypoint is placed, and a track never records the place
    that was searched for.
+
+   A waypoint can go in the *middle* of a route as well as on the end: every leg
+   carries a ghost handle at its midpoint, and dragging one splits that leg in two.
+   The handle sits on the routed road rather than on the straight line between two
+   pins, because on any real leg those are nowhere near each other. `insertIndexForLeg`
+   in `packages/track/src/legs.ts` owns the one case that is easy to get wrong — a
+   circuit's closing leg runs back to waypoint 0, and splitting it inserts at the
+   *end* of the list, since inserting at 0 would move the start line instead.
 2. **Race setup** — vehicle class, laps, weather, field size, then a racer roster table
    where each row is name / color / personality / skill, with a "randomize field" button
    and the ability to save the roster as a reusable template.
