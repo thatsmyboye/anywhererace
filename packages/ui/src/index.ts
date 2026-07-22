@@ -9,6 +9,7 @@ export * from './markers';
 export * from './useRaceClient';
 export * from './useTrackBuilder';
 export * from './useRaceSetup';
+export * from './useMapSearch';
 export * from './racerNames';
 
 export { RaceView } from './components/RaceView';
@@ -23,6 +24,9 @@ export type { TrackListProps } from './components/TrackList';
 export { TrackBuilder } from './components/builder/TrackBuilder';
 export type { TrackBuilderProps } from './components/builder/TrackBuilder';
 export { BuilderMap } from './components/builder/BuilderMap';
+export type { BuilderMapProps, MapFocus } from './components/builder/BuilderMap';
+export { MapSearch } from './components/builder/MapSearch';
+export type { MapSearchProps } from './components/builder/MapSearch';
 export { ElevationProfile } from './components/builder/ElevationProfile';
 export { RaceSetup } from './components/setup/RaceSetup';
 export { SeparationPoints } from './components/setup/SeparationPoints';

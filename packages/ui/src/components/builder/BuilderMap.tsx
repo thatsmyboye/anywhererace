@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
-import type { LatLng } from '@anywhererace/core';
+import type { LatLng, LatLngBounds } from '@anywhererace/core';
 import { THEME } from '../../palette';
 import type { BuilderLeg } from '../../useTrackBuilder';
 
@@ -22,6 +22,23 @@ import type { BuilderLeg } from '../../useTrackBuilder';
 const ROUTE_SOURCE = 'builder-route';
 const FAILED_SOURCE = 'builder-failed';
 
+/**
+ * Somewhere to point the camera, after the map already exists.
+ *
+ * Separate from `initialCenter` because they answer different questions:
+ * `initialCenter` is where the map opens, and changing it rebuilds the map,
+ * which would throw away the user's pan and zoom. This just moves the camera.
+ * A fresh object means "go there now", so selecting the same place twice moves
+ * the map twice — which is what a user who has since panned away expects.
+ */
+export type MapFocus = {
+  center: LatLng;
+  /** Used when there are no bounds to frame. */
+  zoom: number;
+  /** Preferred when present: framing the extent beats guessing a zoom. */
+  bounds?: LatLngBounds | undefined;
+};
+
 export type BuilderMapProps = {
   waypoints: readonly LatLng[];
   legs: readonly BuilderLeg[];
@@ -30,10 +47,19 @@ export type BuilderMapProps = {
   /** Where to open the map when there is nothing drawn yet. */
   initialCenter: LatLng;
   initialZoom: number;
+  /** Move the camera here. Nothing drawn is affected. */
+  focus?: MapFocus | undefined;
   onAddWaypoint: (point: LatLng) => void;
   onMoveWaypoint: (index: number, point: LatLng) => void;
   onRemoveWaypoint: (index: number) => void;
 };
+
+/**
+ * Never frame a place closer than this, however small its bounds. A hamlet's
+ * bounding box can be two hundred meters across, and landing at zoom 18 puts
+ * the user inside a single junction with no idea which way the town runs.
+ */
+const MAX_FOCUS_ZOOM = 15;
 
 export const BuilderMap = ({
   waypoints,
@@ -42,6 +68,7 @@ export const BuilderMap = ({
   attribution,
   initialCenter,
   initialZoom,
+  focus,
   onAddWaypoint,
   onMoveWaypoint,
   onRemoveWaypoint,
@@ -92,6 +119,25 @@ export const BuilderMap = ({
     };
     // Style and attribution come from a provider chosen once at startup.
   }, [styleUrl, attribution, initialCenter.lat, initialCenter.lng, initialZoom]);
+
+  // --- camera --------------------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined || focus === undefined) return;
+
+    if (focus.bounds !== undefined) {
+      const { south, west, north, east } = focus.bounds;
+      map.fitBounds(
+        [
+          [west, south],
+          [east, north],
+        ],
+        { padding: 48, maxZoom: MAX_FOCUS_ZOOM },
+      );
+      return;
+    }
+    map.flyTo({ center: [focus.center.lng, focus.center.lat], zoom: focus.zoom });
+  }, [focus]);
 
   // --- waypoint markers ----------------------------------------------------
   useEffect(() => {

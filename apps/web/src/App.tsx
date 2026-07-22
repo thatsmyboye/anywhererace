@@ -327,6 +327,7 @@ export const App = () => {
         <TrackBuilder
           routing={providers.routing}
           elevation={providers.elevation}
+          geocoding={providers.geocoding}
           styleUrl={styleUrl}
           attribution={providers.tiles.attribution}
           onSave={saveTrack}

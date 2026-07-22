@@ -62,6 +62,7 @@ Read these before writing any code. Violating them causes rework.
 | Map render | MapLibre GL JS | Free, vector tiles, no Mapbox billing |
 | Tiles | Protomaps or MapTiler free tier | Swappable behind `TileProvider` |
 | Routing / snap-to-route | **Valhalla** (self-hosted or FOSSGIS public) | Behind `RoutingProvider` interface. Chosen over OSRM because we need multiple travel profiles *and* turn restrictions in one engine — see "Routing profiles" below |
+| Place search | Nominatim (OSM) | Behind `GeocodingProvider`. Towns and countries only, never streets or landmarks — it exists to point the map at where you want to draw. Alone among the providers it has **no fallback**; see below |
 | Elevation | **Open-Meteo elevation** (Copernicus GLO-90) | Cached per track, never re-fetched. Open-Topo-Data's SRTM 30m is the better dataset and sends no CORS headers, so it cannot be called from a browser at all — see `openmeteo-elevation.ts` |
 | Weather | Open-Meteo | Free, no key, forecast + historical |
 | Persistence | IndexedDB (Dexie) local-first; Supabase optional for sync/sharing | Sim must work fully offline once a track is saved |
@@ -524,7 +525,10 @@ to be in-bunch shuffling with nothing worth showing among them.
 
 1. **Track builder** — click to drop waypoints, drag to adjust, snapped route drawn
    live. Show length, elevation profile, and detected corner count. Toggle
-   circuit/point-to-point. Undo/redo. Save.
+   circuit/point-to-point. Undo/redo. Save. A place search over the map gets you to
+   the right part of the world without panning an ocean; it moves the camera and
+   does nothing else — no waypoint is placed, and a track never records the place
+   that was searched for.
 2. **Race setup** — vehicle class, laps, weather, field size, then a racer roster table
    where each row is name / color / personality / skill, with a "randomize field" button
    and the ability to save the roster as a reusable template.
@@ -590,7 +594,8 @@ this comparison.
 
 ### External services
 
-All three are optional at runtime and each falls back independently:
+All of them are optional at runtime. The first four fall back independently; place
+search deliberately does not, for the reason below.
 
 | Service | Used for | Without it |
 |---|---|---|
@@ -598,6 +603,20 @@ All three are optional at runtime and each falls back independently:
 | Valhalla (FOSSGIS public) | snapping routes to real roads | synthetic geometry, flagged in the UI |
 | Open-Meteo elevation | real gradients | synthetic hills, flagged in the UI |
 | Open-Meteo | the real forecast, baked at race creation | dry and still, flagged in the UI |
+| Nominatim | finding a town or country to draw in | **no fallback** — search says it is unavailable and the map stays put |
+
+**Place search has no fallback on purpose.** A synthetic DEM still gives you hills
+to race over and a synthetic router still gives you a road; a synthetic gazetteer
+would move the map to somewhere that is not the place the user named, under a name
+they trust. A mock exists in `providers/mock/geocoding.ts` for tests and is
+deliberately never wired into `createProviders`. Nominatim's usage policy caps us
+at one request a second, which is why `useMapSearch` debounces rather than
+searching per keystroke, and why every lookup carries an abort signal.
+
+Framing a result uses its bounding box, except for countries. A country's extent
+covers everything it governs — Portugal's box reaches the Azores, France's reaches
+French Guiana — so fitting it lands the user in an empty ocean. Countries get a
+fixed continental zoom on their own point, which is on the mainland.
 
 Only MapTiler needs a key: put it in `apps/web/.env.local` (gitignored; see
 `apps/web/.env.example`). It ships to the browser and so is public — restrict it

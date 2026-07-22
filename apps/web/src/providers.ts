@@ -3,6 +3,7 @@ import {
   createMockElevationProvider,
   createMockRoutingProvider,
   createMockWeatherProvider,
+  createNominatimProvider,
   createOpenMeteoElevationProvider,
   createOpenMeteoProvider,
   createValhallaProvider,
@@ -12,6 +13,7 @@ import {
 } from '@anywhererace/core';
 import type {
   ElevationProvider,
+  GeocodingProvider,
   RoutingProvider,
   TileProvider,
   WeatherProvider,
@@ -37,6 +39,12 @@ export type AppProviders = {
   routing: RoutingProvider;
   elevation: ElevationProvider;
   weather: WeatherProvider;
+  /**
+   * Place search. Alone among these it has no mock behind it: a synthetic
+   * gazetteer would send a user to somewhere that is not the place they named,
+   * which is a worse answer than "search is unavailable, pan there yourself".
+   */
+  geocoding: GeocodingProvider;
   tiles: TileProvider;
   /** Snapshot of what has fallen back so far. */
   degraded: () => DegradedState;
@@ -96,6 +104,7 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
     routing,
     elevation,
     weather,
+    geocoding: createNominatimProvider(),
     tiles: createMapTilerProvider({ apiKey: options.maptilerKey }),
     degraded: () => ({ ...state }),
   };

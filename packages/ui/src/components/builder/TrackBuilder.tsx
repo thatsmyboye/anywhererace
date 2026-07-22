@@ -1,7 +1,19 @@
-import { useCallback, useEffect } from 'react';
-import type { ElevationProvider, LatLng, RoutingProfile, RoutingProvider, Track, TrackMode } from '@anywhererace/core';
+import { useCallback, useEffect, useState } from 'react';
+import type {
+  ElevationProvider,
+  GeocodingProvider,
+  LatLng,
+  Place,
+  RoutingProfile,
+  RoutingProvider,
+  Track,
+  TrackMode,
+} from '@anywhererace/core';
+import { ZOOM_FOR_KIND } from '@anywhererace/core';
 import { BuilderMap } from './BuilderMap';
+import type { MapFocus } from './BuilderMap';
 import { ElevationProfile } from './ElevationProfile';
+import { MapSearch } from './MapSearch';
 import { useTrackBuilder } from '../../useTrackBuilder';
 import type { BuilderLeg } from '../../useTrackBuilder';
 import { UnitToggle, useUnits } from '../../units';
@@ -19,6 +31,12 @@ import { UnitToggle, useUnits } from '../../units';
 export type TrackBuilderProps = {
   routing: RoutingProvider;
   elevation: ElevationProvider;
+  /**
+   * Place search, for getting to where you want to draw. Optional: without it
+   * the box simply is not offered, which is a better answer than a search field
+   * that never finds anything.
+   */
+  geocoding?: GeocodingProvider | undefined;
   styleUrl: string;
   attribution: string;
   initialCenter?: LatLng;
@@ -36,6 +54,7 @@ const DEFAULT_ZOOM = 14;
 export const TrackBuilder = ({
   routing,
   elevation,
+  geocoding,
   styleUrl,
   attribution,
   initialCenter = DEFAULT_CENTER,
@@ -47,6 +66,23 @@ export const TrackBuilder = ({
   const builder = useTrackBuilder({ routing, elevation });
   const { actions } = builder;
   const units = useUnits();
+
+  // A fresh object per selection, so picking the same place twice moves the
+  // camera twice — a user who has panned away since expects it to go back.
+  const [focus, setFocus] = useState<MapFocus | undefined>(undefined);
+  const goTo = useCallback((place: Place) => {
+    setFocus({
+      center: place.center,
+      zoom: ZOOM_FOR_KIND[place.kind],
+      // Framing the extent is right for a town or a region and wrong for a
+      // country, because a country's extent includes everything it governs:
+      // Portugal's bounding box reaches the Azores, France's reaches French
+      // Guiana, and fitting either drops the user in an empty ocean halfway to
+      // somewhere they did not ask for. A country's own point is on the
+      // mainland, so a fixed continental zoom on it is the answer they meant.
+      bounds: place.kind === 'country' ? undefined : place.bounds,
+    });
+  }, []);
 
   // Keyboard undo/redo. Standard bindings, including the Windows-style
   // Ctrl+Y that a lot of people reach for.
@@ -216,10 +252,16 @@ export const TrackBuilder = ({
           attribution={attribution}
           initialCenter={initialCenter}
           initialZoom={initialZoom}
+          focus={focus}
           onAddWaypoint={actions.addWaypoint}
           onMoveWaypoint={actions.moveWaypoint}
           onRemoveWaypoint={actions.removeWaypoint}
         />
+        {geocoding === undefined ? null : (
+          <div className="absolute left-4 top-4 z-10">
+            <MapSearch geocoding={geocoding} onSelect={goTo} />
+          </div>
+        )}
         {builder.waypoints.length === 0 ? (
           <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
             <p className="rounded-full border border-[#2b3543] bg-[#161b24]/90 px-4 py-2 text-sm text-[#8d9bb0] backdrop-blur">
