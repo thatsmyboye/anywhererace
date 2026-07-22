@@ -1,7 +1,7 @@
 import type { Track } from '@anywhererace/core';
 import { runRace } from '@anywhererace/sim';
 import type { RaceConfig } from '@anywhererace/sim';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SHARE_SCHEMA_VERSION,
   decodeSharedRace,
@@ -18,6 +18,10 @@ import { makeConfig, makeSyntheticTrack } from '../../sim/test/fixtures';
  * readable, current-schema payload is refused with a reason rather than
  * half-parsed.
  */
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const makeSharedRace = (
   trackOverrides: Partial<Track> = {},
@@ -60,6 +64,19 @@ describe('shared race codec', () => {
   it('is deterministic: the same race always yields the same link', () => {
     const race = makeSharedRace();
     expect(encodeSharedRace(race)).toBe(encodeSharedRace(race));
+  });
+
+  it('yields the same link tomorrow as it does today', () => {
+    // gzip carries a modification time in its header, and a compressor left to
+    // fill it from the clock makes the same race encode differently depending
+    // on when you asked. This used to fail roughly whenever a test run happened
+    // to straddle a second boundary, which is the worst way to find out.
+    const race = makeSharedRace();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const today = encodeSharedRace(race);
+    vi.setSystemTime(new Date('2026-01-02T12:34:56Z'));
+    expect(encodeSharedRace(race)).toBe(today);
   });
 
   it('fits a short track inline in a URL', () => {

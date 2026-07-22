@@ -89,7 +89,12 @@ export type ShareError = {
  */
 export const encodeSharedRace = (race: SharedRace): string => {
   const json = JSON.stringify(race, nonFiniteReplacer);
-  const compressed = gzipSync(strToU8(json), { level: 9 });
+  // `mtime: 0` is load-bearing, not tidiness. gzip carries a modification time
+  // in its header and fflate fills it from the clock, so the same race encoded
+  // twice a second apart produced two different links — which contradicts the
+  // whole premise that a shared race is its inputs, and made the determinism
+  // test fail only when a run happened to straddle a second boundary.
+  const compressed = gzipSync(strToU8(json), { level: 9, mtime: 0 });
   return WIRE_PREFIX + base64UrlEncode(compressed);
 };
 
