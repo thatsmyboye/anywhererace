@@ -4,6 +4,7 @@
 export * from './feed';
 export * from './units';
 export * from './separationCopy';
+export * from './heatGeometry';
 export * from './palette';
 export * from './markers';
 export * from './useRaceClient';

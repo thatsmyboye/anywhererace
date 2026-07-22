@@ -731,7 +731,22 @@ These are unresolved. Ask before assuming:
   report, then position-by-lap and lap-time charts, sector bests and the
   incident timeline. The narrative is assembled from the event log by template,
   never by a model — a shared race has to read identically for everyone, which
-  rules out anything non-deterministic.
+  rules out anything non-deterministic. Picking a racer in the classification
+  colours the track behind the panel with where they gained and lost, and
+  dismisses the panel, because the thing they asked to look at is underneath it.
+- **The heat map measures against the field's median, and the sim does the
+  timing.** `segments.ts` books every racer's time through each band of the lap
+  as the tick goes, because nothing downstream can: the event log records
+  moments rather than elapsed time per meter, and the frames the worker keeps
+  for scrubbing are downsampled and capped, so anything derived from them would
+  get coarser on exactly the long races where this is most interesting. It is
+  pure bookkeeping — no `Rng`, nothing reads it back, and it is deliberately not
+  in `resultHash`, so it cannot move the goldens. The reference is the *median*
+  of every racer's mean through a band rather than the mean of it, because one
+  rider crawling through a corner after a spin would otherwise paint that corner
+  slow for the whole field, which is exactly backwards. Bands a racer never rode
+  end to end are absent rather than zero: a retirement has nothing to say about
+  the half of the lap it never reached.
 - **Finished races are stored as inputs, not recordings.** A saved race keeps
   its track id, config, seed, `simVersion` and `resultHash`; reopening it
   re-runs the simulation. That is the same contract `SharedRace` needs, and it

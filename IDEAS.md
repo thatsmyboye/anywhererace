@@ -95,11 +95,15 @@ Nothing in the sim would need to change; it is purely an editor.
 **A "why did they lose" explainer on the results page.** The event log plus the
 debug toggles make this tractable: re-run the same seed with `incidents: false`
 and diff the finishing order to say "they lost 12 seconds to that spin on lap
-4". This would be cheap and unusually satisfying.
+4". This would be cheap and unusually satisfying, and the track heat map is now
+most of the *where* — what is missing is the *why*.
 
-**Sector-level heat map on the track.** The baker already computes curvature,
-gradient and surface per 5m node; overlaying where each racer gained and lost
-time against the field is mostly a rendering job.
+**A field-spread heat map**, alongside the per-racer one that is built. Same
+segment timing, different reading: colour each stretch by how much the field
+came apart through it, and you have where the race was actually decided rather
+than where one racer lost it. It would sit naturally beside the separation
+points, which predict the same thing from the road alone — and comparing the
+two would say how good that prediction was.
 
 **Ghost replay against a previous race on the same track.** Determinism makes
 this nearly free — two seeds, same track, render both.

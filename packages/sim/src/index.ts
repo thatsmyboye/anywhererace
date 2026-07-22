@@ -18,6 +18,7 @@ export * from './hash';
 export * from './setup';
 export * from './profile';
 export * from './tick';
+export * from './segments';
 export * from './race';
 export * from './results';
 export * from './narrative';

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Track } from '@anywhererace/core';
 import type { DebugToggles, RaceConfig, RaceResult } from '@anywhererace/sim';
-import { getVehicleClass } from '@anywhererace/sim';
+import { buildSegmentHeat, getVehicleClass } from '@anywhererace/sim';
 import { EventFeed } from './EventFeed';
 import { PlaybackControls } from './PlaybackControls';
 import { RaceMap } from './RaceMap';
@@ -59,12 +59,21 @@ export const RaceView = ({
   // the finished race with its scrubber intact rather than closing anything —
   // so a chart can send you back to the lap it was describing.
   const [resultsDismissed, setResultsDismissed] = useState(false);
+  // Whose heat map the track is showing, if anyone's. Lives here rather than in
+  // the results panel because the map it colours is underneath the panel, and
+  // dismissing the panel is how you get a clear look at it.
+  const [heatRacerId, setHeatRacerId] = useState<string | undefined>(undefined);
   const race = useRaceClient({
     track,
     config,
     ...(toggles ? { toggles } : {}),
     createWorker,
   });
+
+  const heat = useMemo(() => {
+    if (heatRacerId === undefined || race.result === undefined) return undefined;
+    return buildSegmentHeat(race.result.segments, heatRacerId);
+  }, [heatRacerId, race.result]);
 
   if (race.status === 'error') {
     return (
@@ -94,6 +103,7 @@ export const RaceView = ({
         frameRef={race.frameRef}
         styleUrl={styleUrl}
         attribution={attribution}
+        heat={heat}
       />
 
       {/* Overlay. Ignores pointer events so the map stays draggable underneath;
@@ -135,7 +145,7 @@ export const RaceView = ({
       </div>
 
       {race.status === 'finished' && race.result !== undefined && resultsDismissed ? (
-        <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-4 flex flex-col items-center gap-2">
           <button
             type="button"
             onClick={() => setResultsDismissed(false)}
@@ -149,6 +159,14 @@ export const RaceView = ({
               See results
             </span>
           </button>
+
+          {heat === undefined ? null : (
+            <HeatLegend
+              name={race.racersById.get(heat.racerId)?.name ?? heat.racerId}
+              peakS={heat.peakS}
+              onClear={() => setHeatRacerId(undefined)}
+            />
+          )}
         </div>
       ) : null}
 
@@ -160,6 +178,14 @@ export const RaceView = ({
           racersById={race.racersById}
           trackName={trackName ?? track.name}
           onDismiss={() => setResultsDismissed(true)}
+          heatRacerId={heatRacerId}
+          onHeatRacer={(racerId) => {
+            setHeatRacerId(racerId);
+            // Selecting a racer is a request to look at the road, and the road
+            // is behind this panel. Choosing one and then having to dismiss the
+            // panel yourself would be asking twice for the same thing.
+            if (racerId !== undefined) setResultsDismissed(true);
+          }}
           actions={resultActions?.(race.result)}
           versionMismatch={
             savedAs !== undefined && savedAs.resultHash !== race.result.resultHash
@@ -171,3 +197,43 @@ export const RaceView = ({
     </div>
   );
 };
+
+/**
+ * What the colours on the track mean.
+ *
+ * Says "against the field" rather than "against the winner", because that is
+ * what the number is: the median racer's time through the same stretch. It also
+ * names the peak, since the ramp is scaled per race — without that, two races
+ * would look equally dramatic when one was decided by a tenth and the other by
+ * half a minute.
+ */
+const HeatLegend = ({
+  name,
+  peakS,
+  onClear,
+}: {
+  name: string;
+  peakS: number;
+  onClear: () => void;
+}) => (
+  <div className="pointer-events-auto flex items-center gap-3 rounded-lg border border-[#2b3543] bg-[#161b24]/95 px-3 py-1.5 text-xs backdrop-blur">
+    <span className="font-semibold text-[#e6ebf2]">{name}</span>
+    <span className="flex items-center gap-1.5 text-[#8d9bb0]">
+      <span className="h-1.5 w-5 rounded-full bg-[#3ddc97]" aria-hidden="true" />
+      gained
+      <span className="ml-2 h-1.5 w-5 rounded-full bg-[#ff5c5c]" aria-hidden="true" />
+      lost
+    </span>
+    <span className="tabular-nums text-[#8d9bb0]">
+      against the field · up to {peakS.toFixed(2)}s per pass
+    </span>
+    <button
+      type="button"
+      onClick={onClear}
+      aria-label={`Stop showing where ${name} gained and lost time`}
+      className="rounded px-1 text-[#8d9bb0] transition-colors hover:bg-[#2b3543] hover:text-[#e6ebf2]"
+    >
+      ×
+    </button>
+  </div>
+);
