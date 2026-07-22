@@ -46,36 +46,43 @@ tick already has.
 
 ## Left over from the peloton change
 
-The peloton entry that used to head the v2 list is built — see "Riding in a
-bunch" in CLAUDE.md. Four things it turned up and did not do:
+The peloton work is built, and so are three of the four follow-ups it turned up:
+the front rotates properly, attacks read the field as well as the road, and a
+dropped rider decides whether to chase, sit up, or wait. See "Riding in a bunch"
+in CLAUDE.md. What is still open:
 
-**Rotation on the front is averaged, not simulated.** Every member of a group
-gets the same `rotationShare` credit for turns shared out, which is a stand-in
-for riders actually taking pulls and swinging off. It gets the aggregate right —
-a bunch rides faster than any of its members could alone — but it means nobody
-is ever individually *on the front doing the work*, so a rider cannot be worn
-down by having spent the race there, and a team cannot bury itself for a leader.
-Modelling the rotation properly needs a notion of whose turn it is, which is the
-first thing in the sim that would look like tactics between racers rather than
-within one.
+**The echelon has no lateral truth to it.** Deliberately deferred rather than
+missed. It is expressed as a reset of shelter depth, which produces the right
+per-rider outcome — a rider past the width of the road loses most of their tow —
+without any rider ever having a position across the road. The sim is 1D along
+the route and should stay that way, but it does mean the map cannot draw an
+echelon, and drawing one is most of what makes them legible to a viewer.
 
-**Attacks are a roll, not a plan.** `considerAttack` reads the road ahead and
-the racer's own traits, and nothing else. It cannot see that the race is already
-up the road, that the rider is the only one left who can chase, or that three of
-their rivals just went. Reading the *field* as well as the road is the natural
-next increment and `bunch.ts` already computes most of what it would need.
+**Echelons do not change race results, only individual riders.** Worth knowing
+before anyone tunes them. The mechanism is strong: on a 5m road a full crosswind
+takes a rider four wheels deep from 0.77 of the maximum tow to 0.06. It is not
+detectable in a finishing order, because the field reorganises around it —
+riders who lose the shelter drift back, chains stop growing past an echelon's
+width, and everyone settles into *some* echelon with a workable tow. Across ten
+seeds a 12 m/s crosswind moved mean finishing time by 0.2%, in the wrong
+direction, and left the field slightly *less* fragmented. Making a crosswind
+decide a race probably needs the lateral structure above, so that being caught on
+the wrong side of a split is a place you can be rather than a number you have.
 
-**The echelon has no lateral truth to it.** It is expressed as a reset of
-shelter depth, which produces the right outcome — the riders past the width of
-the road get nothing and the field strings out — without any rider ever having a
-position across the road. That is deliberate, since the sim is 1D along the
-route and should stay that way, but it does mean the map cannot draw an echelon,
-and drawing one is most of what makes them legible to a viewer.
+**Leading does not cost you the race.** A rider on the front now genuinely works
+— above their own sustainable effort, drawn from the reservoir — which is the
+thing the averaged credit could never do. But over both a 30-minute circuit and a
+50km road race with an identical field, the riders who spent the most time on the
+front finished *better*, not worse: at the front of a bunch, having done the work
+and being ahead on the road are the same thing. For fatigue to decide anything, a
+rider needs a reason to bury themselves for somebody who is not them, which is
+team tactics — the first thing in the sim that would be about relationships
+between racers rather than traits within one.
 
-**A dropped rider does not know they are dropped.** They ride their own pace and
-the gap grows. Real riders sit up, or chase, or wait for the next group back;
-which of those they do is exactly the sort of thing `composure` and `ambition`
-are for.
+**Nobody sits up for anybody.** The dropped-rider model covers a racer reacting
+to their own situation. It has no notion of waiting for a team-mate, refusing to
+work with a rival, or a group agreeing to collaborate — all of which are the same
+missing concept as above.
 
 ---
 

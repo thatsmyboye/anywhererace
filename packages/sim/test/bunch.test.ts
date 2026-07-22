@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { BunchMember } from '../src/bunch';
 import { readBunch } from '../src/bunch';
 import { buildTrackProfile } from '../src/profile';
+import { createRace } from '../src/race';
 import { TUNING } from '../src/tuning';
 import { getVehicleClass } from '../src/data/vehicles';
-import { makeSyntheticTrack } from './fixtures';
+import { makeConfig, makeField, makeSyntheticTrack } from './fixtures';
 
 /**
  * `bunch.ts` is the one piece of field-shape reading that the tick actually
@@ -46,7 +47,32 @@ describe('bunch: reading who is riding with whom', () => {
       groupPaceMs: 10,
       groupSize: 1,
       onFront: true,
+      // Nobody ahead and nobody behind. Infinity rather than a sentinel, because
+      // it is the literal answer and it reads correctly everywhere: an infinite
+      // gap is never bridgeable and never worth waiting for.
+      gapToGroupAheadS: Number.POSITIVE_INFINITY,
+      gapToGroupBehindS: Number.POSITIVE_INFINITY,
     });
+  });
+
+  it('reports the gaps to the groups either side, and only to those', () => {
+    // Three groups: a lone leader, a pair, then a lone straggler.
+    const split = TUNING.bunch.cohesionGapS + 2;
+    const states = readBunch(fieldAtGaps(10, [split, 0.5, split + 3]));
+
+    // The leader has open road ahead and the pair behind.
+    expect(states.get('r00')?.gapToGroupAheadS).toBe(Number.POSITIVE_INFINITY);
+    expect(states.get('r00')?.gapToGroupBehindS).toBeCloseTo(split, 6);
+
+    // Both members of the middle group see the same two gaps, because both are
+    // facts about the group rather than about either rider in it.
+    expect(states.get('r01')?.gapToGroupAheadS).toBeCloseTo(split, 6);
+    expect(states.get('r02')?.gapToGroupAheadS).toBeCloseTo(split, 6);
+    expect(states.get('r01')?.gapToGroupBehindS).toBeCloseTo(split + 3, 6);
+    expect(states.get('r02')?.gapToGroupBehindS).toBeCloseTo(split + 3, 6);
+
+    // The straggler has nobody behind them at all.
+    expect(states.get('r03')?.gapToGroupBehindS).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('shelter depth counts every wheel ahead, not just the one in front', () => {
@@ -123,6 +149,97 @@ describe('bunch: reading who is riding with whom', () => {
     const members = fieldAtGaps(11, [0.4, 1.1, 0.6, 3.0, 0.5]);
     expect([...readBunch(members).entries()]).toEqual([...readBunch(members).entries()]);
   });
+});
+
+/**
+ * Turns on the front.
+ *
+ * The behavior that replaced a flat shelter credit every member of a group used
+ * to receive. The credit had the aggregate right — a bunch rode faster than any
+ * of its members could alone — while nobody was ever individually on the front
+ * doing the work.
+ *
+ * What this asserts is that the work now circulates. What it deliberately does
+ * *not* assert is that doing it costs you the race, and that is worth writing
+ * down: over both a 30-minute circuit and a 50km road race, with an identical
+ * field, the riders who spent the most time on the front finished *better*, not
+ * worse. The effect is real — a turn on the front is ridden above the rider's
+ * own sustainable effort and drains the reservoir quadratically — but it is
+ * swamped by the fact that at the front of a bunch, "did the work" and "is ahead
+ * on the road" are the same thing. Making fatigue decide races would need a
+ * reason for a rider to bury themselves for somebody else, which is team
+ * tactics. See IDEAS.md.
+ */
+describe('bunch: the work circulates', () => {
+  const CIRCUIT = makeSyntheticTrack({
+    lengthM: 2400,
+    mode: 'circuit',
+    curvatureRadius: 200,
+  });
+
+  /** How many one-second samples each racer spent leading the biggest group. */
+  const frontTimeByRacer = (seed: string): Map<string, number> => {
+    const created = createRace({
+      track: CIRCUIT,
+      config: makeConfig({
+        trackId: CIRCUIT.id,
+        vehicleClassId: 'road-cyclist',
+        racers: makeField({ size: 16 }),
+        laps: 8,
+        seed,
+      }),
+      // Incidents off: a rider who spins out of the bunch stops taking turns for
+      // reasons that have nothing to do with rotation.
+      toggles: { incidents: false, mechanicalFailures: false },
+    });
+    if (!created.ok) throw new Error(created.error.message);
+    const race = created.value;
+
+    const samples = new Map<string, number>();
+    while (race.step(20)) {
+      const members = race
+        .snapshot()
+        .racers.filter((racer) => racer.status === 'racing')
+        .map((racer) => ({
+          id: racer.racerId,
+          distanceM: racer.distanceAlongRoute,
+          speedMs: racer.speedMs,
+        }))
+        .sort((a, b) => b.distanceM - a.distanceM);
+      if (members.length === 0) break;
+
+      const states = readBunch(members);
+      // The peloton, meaning the biggest group on the road — not the race
+      // leader, who may be up the road alone and taking no turns from anyone.
+      let leader = '';
+      let biggest = 1;
+      for (const member of members) {
+        const state = states.get(member.id);
+        if (state?.onFront === true && state.groupSize > biggest) {
+          biggest = state.groupSize;
+          leader = member.id;
+        }
+      }
+      if (leader === '') continue;
+      samples.set(leader, (samples.get(leader) ?? 0) + 1);
+    }
+    return samples;
+  };
+
+  it('the front of the peloton changes hands, and no one rider owns it', () => {
+    for (const seed of ['rot-1', 'rot-2', 'rot-3']) {
+      const front = frontTimeByRacer(seed);
+      const counts = [...front.values()];
+      const total = counts.reduce((sum, value) => sum + value, 0);
+      const most = Math.max(...counts);
+
+      expect(front.size, `seed ${seed}: only ${front.size} riders ever led the bunch`).toBeGreaterThanOrEqual(8);
+      expect(
+        most / total,
+        `seed ${seed}: one rider led ${((most / total) * 100).toFixed(0)}% of the race`,
+      ).toBeLessThan(0.65);
+    }
+  }, 60_000);
 });
 
 describe('bunch: reading the course sweep', () => {

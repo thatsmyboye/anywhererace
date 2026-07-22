@@ -67,6 +67,23 @@ export type BunchState = {
   readonly groupSize: number;
   /** True if this racer is setting the pace — no shelter, and no free ride. */
   readonly onFront: boolean;
+
+  /**
+   * Road gap from this racer's group to the one up the road, in seconds, and to
+   * the one coming behind.
+   *
+   * `Infinity` when there is no such group — which is the literal truth rather
+   * than a sentinel, and behaves correctly everywhere it is read: a gap of
+   * infinity is never bridgeable and never worth waiting for, and `clamp01`
+   * turns it into exactly the "no chance" end of every scale it feeds. Nothing
+   * multiplies by these, only compares.
+   *
+   * These are what let a racer see the *race* rather than only their own wheel.
+   * Whether to attack, and what to do about having been dropped, are both
+   * questions about what is happening elsewhere on the road.
+   */
+  readonly gapToGroupAheadS: number;
+  readonly gapToGroupBehindS: number;
 };
 
 /**
@@ -79,6 +96,8 @@ export const SOLO_BUNCH: BunchState = {
   groupPaceMs: 0,
   groupSize: 1,
   onFront: true,
+  gapToGroupAheadS: Number.POSITIVE_INFINITY,
+  gapToGroupBehindS: Number.POSITIVE_INFINITY,
 };
 
 /**
@@ -104,6 +123,8 @@ export const readBunch = (ordering: readonly BunchMember[]): Map<RacerId, BunchS
   const frontOf = new Int32Array(count);
   const shelterOf = new Int32Array(count);
   const sizeOf = new Int32Array(count);
+  /** Gap from the racer at i-1 to the racer at i. Index 0 is meaningless. */
+  const gapAtS = new Float64Array(count);
 
   let depth = 0;
   let front = 0;
@@ -115,6 +136,7 @@ export const readBunch = (ordering: readonly BunchMember[]): Map<RacerId, BunchS
     // Below walking pace a time gap is meaningless and would explode. This
     // mirrors how `race.ts` converts a distance gap for the traffic model.
     const gapS = (ahead.distanceM - racer.distanceM) / Math.max(racer.speedMs, 1);
+    gapAtS[i] = gapS;
 
     // Two chains, broken at two different gaps. The slipstream ends where the
     // tow physically ends; the group ends rather later, because a rider who has
@@ -137,22 +159,37 @@ export const readBunch = (ordering: readonly BunchMember[]): Map<RacerId, BunchS
 
   // Size and total speed per group, accumulated against the index of whichever
   // racer leads it — the one identifier every member of a group already shares.
+  // `lastOf` works the same way and relies on groups being contiguous ascending
+  // runs of `ordering`, which is what building them in one forward pass makes
+  // them.
   const speedSumOf = new Float64Array(count);
+  const lastOf = new Int32Array(count);
   for (let i = 0; i < count; i++) {
     const frontIndex = frontOf[i] as number;
     sizeOf[frontIndex] = (sizeOf[frontIndex] as number) + 1;
     speedSumOf[frontIndex] =
       (speedSumOf[frontIndex] as number) + (ordering[i] as BunchMember).speedMs;
+    lastOf[frontIndex] = i;
   }
 
   for (let i = 0; i < count; i++) {
     const frontIndex = frontOf[i] as number;
     const size = sizeOf[frontIndex] as number;
+    // The gap that broke the chain in front of this group is the one recorded at
+    // its leader; the gap behind it is the one recorded just past its last
+    // member. Both are shared by every member of the group, because both are
+    // facts about the group rather than about any rider in it.
+    const behindIndex = (lastOf[frontIndex] as number) + 1;
+
     states.set((ordering[i] as BunchMember).id, {
       shelterDepth: shelterOf[i] as number,
       groupPaceMs: (speedSumOf[frontIndex] as number) / size,
       groupSize: size,
       onFront: frontIndex === i,
+      gapToGroupAheadS:
+        frontIndex === 0 ? Number.POSITIVE_INFINITY : (gapAtS[frontIndex] as number),
+      gapToGroupBehindS:
+        behindIndex < count ? (gapAtS[behindIndex] as number) : Number.POSITIVE_INFINITY,
     });
   }
 

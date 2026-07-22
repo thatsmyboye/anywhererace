@@ -165,32 +165,24 @@ export const TUNING = {
      */
     shelterHalfDepth: 1.2,
 
-    /**
-     * Wheels of shelter each *other* member of a racer's group is worth,
-     * regardless of where in it they are sitting.
+    /*
+     * There was a `rotationShare` here: a flat shelter credit every member of a
+     * group received, standing in for the turns they take on the front. It is
+     * gone, and `bunch.pull` replaces it.
      *
-     * This is the term that makes a group a group rather than a queue with a
-     * victim at the head of it. Nobody stays on the front of a bunch — the turns
-     * rotate, and averaged over any length of road that makes every member of a
-     * twenty-rider group faster than a lone rider of identical ability,
-     * including whichever of them happens to be leading right now.
+     * The average was right and the thing it averaged was missing. Every rider
+     * got the aggregate benefit of a rotation nobody actually performed, so a
+     * bunch correctly rode faster than any of its members could alone while no
+     * individual was ever *on the front doing the work* — which meant a rider
+     * could not be worn down by having spent the race there, and no rider could
+     * bury themselves for anyone else. Now the racer on the front rides above
+     * their own sustainable effort for a real turn, pays for it out of the
+     * reservoir, and swings off; the group's speed is the product of those turns
+     * rather than a constant granted to everyone.
      *
-     * It has to exist, and it has to apply to the leader: without it the racer
-     * on the front is modelled as riding solo, and a group can never sustain
-     * more than its least sheltered member's pace.
-     *
-     * It also has to stay *small* relative to the wheel term it is added to, and
-     * that is the harder constraint. The gap between what a leader gets and what
-     * a follower gets is the only thing that makes a follower faster, and
-     * therefore the only thing in the model that ever closes a gap. Set high
-     * enough to equalize them and a peloton stops cohering at all — measured on
-     * a 24-rider race it dissolved into twenty individuals inside ten minutes.
-     *
-     * At 0.15 a group of twenty is worth about three wheels to everyone in it,
-     * against the seven or so a rider sitting on a wheel collects on top of
-     * that. Enough to carry the front; not enough to make the front comfortable.
+     * The number it was worth is now `pull.effortBoost`, which is why that
+     * constant is the size it is.
      */
-    rotationShare: 0.15,
 
     /**
      * Crosswind, in m/s across the direction of travel, at which the shelter
@@ -440,6 +432,123 @@ export const TUNING = {
      * without needing a separate rule for the second thing.
      */
     hangOnEmptyScale: 0.3,
+
+    /**
+     * Taking a turn on the front.
+     *
+     * The racer leading a group has no wheel to hide behind, so if they simply
+     * rode their own pace the group could never go faster than an un-sheltered
+     * solo rider — which is the opposite of what a bunch is for. Real riders
+     * resolve this by going *above* their sustainable effort for a short turn
+     * and then swinging off to recover in the shelter, and that is what this
+     * models: a cost paid by one rider at a time, in rotation, rather than a
+     * discount handed to everybody.
+     */
+    pull: {
+      /**
+       * Extra effort while on the front. Inherited directly from the shelter
+       * credit this replaced — a twenty-rider group used to hand its leader
+       * about nine percent for free, so a turn on the front has to be worth
+       * roughly that much for a bunch to ride at the same pace it did before.
+       * The difference is that it is now spent from the reservoir by whoever is
+       * doing it, and the drain is quadratic in effort.
+       */
+      effortBoost: 0.1,
+
+      /**
+       * How long a turn lasts before the rider swings off, at a full reservoir.
+       * Forty-five seconds is a normal turn in a rotating group — long enough to
+       * be a real contribution, short enough that a bunch of twenty visibly
+       * cycles through its riders over a race.
+       */
+      durationS: 45,
+
+      /**
+       * What that shortens to when the reservoir is empty. A tired rider takes
+       * a token turn and swings off, which is both what happens and what makes
+       * the last hour of a long race look different from the first.
+       */
+      emptyDurationScale: 0.4,
+
+      /**
+       * Effort multiplier while swinging off: easing enough for the next rider
+       * to come through, and no more.
+       *
+       * It has to be a real drop or nobody ever comes past — the traffic model
+       * only lets a racer through on a pace advantage, so an imperceptible ease
+       * would leave the same rider on the front for the whole race with the
+       * group stacked up behind them. Eight percent is comfortably above
+       * `traffic.minSpeedDeltaMs` at any racing speed.
+       */
+      swingOffEase: 0.92,
+
+      /**
+       * How many wheels back a rider drifts before their turn is over.
+       *
+       * Swinging off does not mean being passed by one rider. Ending the ease
+       * the moment somebody came through put the strongest rider straight back
+       * onto the front — measured over a 16-rider, 8-lap race, one rider led the
+       * peloton for 53% of it while nominally rotating. Requiring them to get
+       * several wheels back before they resume full effort is what makes a
+       * rotation a rotation rather than one rider bobbing on and off the front.
+       *
+       * Capped at the size of the group, so a group of three does not wait for a
+       * fourth wheel that does not exist.
+       */
+      recoveryDepth: 4,
+
+      /**
+       * Longest a swing off may last. A backstop, not the usual exit: without
+       * it, a rider who never quite reaches `recoveryDepth` — in a group that is
+       * strung out, or one that keeps shedding riders behind them — eases for
+       * the rest of the race.
+       */
+      maxSwingOffS: 30,
+    },
+
+    /**
+     * Losing the wheel, and what a racer does about it.
+     *
+     * Before this, a dropped rider simply rode their own pace and watched the
+     * gap grow, which is the one thing real riders never do. They decide: dig to
+     * get back on, sit up and ride the rest within themselves, or soft-pedal
+     * until the next group arrives and go with that. Which of the three is a
+     * question about temperament and about what is behind them, so it is rolled
+     * once, from traits, at the moment contact is lost.
+     */
+    dropped: {
+      /** Extra effort while chasing. A dig, and priced like one. */
+      chaseEffortBoost: 0.12,
+
+      /**
+       * How long a chase is pressed before the racer accepts it. Longer than an
+       * attack, because getting back on is worth more than getting away.
+       */
+      chaseDurationS: 90,
+
+      /**
+       * Reservoir below which nobody has a chase in them, and they sit up
+       * instead. The same threshold the attack model uses, for the same reason.
+       */
+      chaseMinReservoir: 0.3,
+
+      /**
+       * Effort multiplier after sitting up: riding the rest of the race within
+       * themselves. Deliberately mild. A dropped rider still wants to finish,
+       * and a heavy penalty here empties the finishing order of exactly the
+       * riders the peloton just shed — which is the failure the crash model was
+       * already fixed for once.
+       */
+      sitUpEase: 0.97,
+
+      /**
+       * Effort multiplier while waiting for the group behind, and how close
+       * that group has to be to be worth waiting for. Softer than sitting up,
+       * because the point is to be caught.
+       */
+      waitEase: 0.94,
+      waitReachS: 45,
+    },
   },
 
   /**
@@ -490,6 +599,37 @@ export const TUNING = {
 
     /** Enforced quiet period after an attack ends, before the same racer goes again. */
     cooldownS: 180,
+
+    /**
+     * How much a group up the road multiplies the urge to go, at its most
+     * reachable.
+     *
+     * Reading the road was only half of it: `attackAppeal` says the climb is a
+     * good place to attack, and says nothing about whether the race is already
+     * gone up it. A rider who can see a group a few seconds ahead has a reason
+     * to move that has nothing to do with the terrain, and a rider who cannot
+     * see anybody is racing for the win from where they are.
+     */
+    bridgeAppeal: 2.5,
+
+    /**
+     * Gap beyond which a group up the road stops being a reason to go and starts
+     * being a reason not to bother. Ninety seconds is out of sight in a bike
+     * race — chasing it alone is a way to lose two places, not gain one.
+     */
+    hopelessGapS: 90,
+
+    /**
+     * How much more willing a racer is to chase when there are few of them to do
+     * it, expressed as the group size at which the urge is halved.
+     *
+     * The free-rider problem, which is a real and famous feature of bike racing:
+     * in a bunch of thirty everyone waits for somebody else to ride, and in a
+     * group of three there is nobody else to wait for. Without this the size of
+     * a group has no bearing on whether anyone in it does anything, and a large
+     * peloton attacks itself apart as readily as a small committed chase group.
+     */
+    onusHalfGroupSize: 4,
   },
 
   /**

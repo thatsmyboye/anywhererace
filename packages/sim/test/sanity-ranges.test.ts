@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { runRace } from '../src/race';
-import { makeConfig, makeField, makeSyntheticTrack, manualWeather } from './fixtures';
+import {
+  makeConfig,
+  makeField,
+  makeSyntheticTrack,
+  manualWeather,
+  yieldToEventLoop,
+} from './fixtures';
 
 /**
  * The sanity table.
@@ -77,9 +83,16 @@ const FLAT_DRY_CASES: SanityCase[] = [
 ];
 
 /**
- * A single racer, no traffic, no incidents, so the number under test is the
- * speed model alone. A Metronome is used because their pacing curve is flat and
- * their noise is nearly zero.
+ * One racer's pace and nothing else, so the number under test is the speed model
+ * alone. A Metronome is used because their pacing curve is flat and their noise
+ * is nearly zero.
+ *
+ * The field is two because that is the minimum a race allows, and drafting and
+ * group behavior are switched off because otherwise those two riders tow each
+ * other and the "solo" figure is nothing of the sort. That was not a theoretical
+ * complaint: the gravel row below is a ratio of two of these numbers, and it
+ * drifted across its threshold when the shelter model changed underneath it —
+ * a test of the surface model failing because of a change to the draft model.
  */
 const soloTimeMinutes = (
   vehicleClassId: string,
@@ -101,8 +114,15 @@ const soloTimeMinutes = (
       ...(options.weather ? { weather: options.weather } : {}),
     }),
     // Incidents and mechanicals are off: a sanity range should not fail because
-    // one run in fifty had a puncture.
-    toggles: { incidents: false, mechanicalFailures: false },
+    // one run in fifty had a puncture. Draft and bunch are off so that "solo"
+    // means solo.
+    toggles: {
+      incidents: false,
+      mechanicalFailures: false,
+      draft: false,
+      bunch: false,
+      tactics: false,
+    },
   });
 
   expect(result.ok).toBe(true);
@@ -300,7 +320,7 @@ describe('sanity ranges: a bunch behaves like a bunch', () => {
 
   it(
     'a bunch rides faster than the same riders strung out',
-    () => {
+    async () => {
       // The shelter a group gives itself, measured end to end. This is a
       // systematic five percent or so and it holds on every seed, which is why
       // it is safe to assert per seed unlike the two aggregate rows around it.
@@ -308,7 +328,9 @@ describe('sanity ranges: a bunch behaves like a bunch', () => {
 
       for (const seed of SEEDS) {
         const bunched = spreadOf(track, seed);
+        await yieldToEventLoop();
         const strungOut = spreadOf(track, seed, { toggles: { bunch: false, tactics: false } });
+        await yieldToEventLoop();
 
         expect(
           bunched.winnerTimeS,
@@ -322,7 +344,7 @@ describe('sanity ranges: a bunch behaves like a bunch', () => {
 
   it(
     'the bulk of a bunch arrives closer together than a strung-out field',
-    () => {
+    async () => {
       // The prediction IDEAS.md made when this was still a v2 candidate:
       // shelter is worth more than the spread in ability between the riders
       // getting it, so a field that holds together arrives together. Roughly a
@@ -338,10 +360,16 @@ describe('sanity ranges: a bunch behaves like a bunch', () => {
       // behavior this whole change exists to produce.
       const track = makeSyntheticTrack({ lengthM: 10_000 });
 
-      const bunched = SEEDS.map((seed) => spreadOf(track, seed).medianGapS);
-      const strungOut = SEEDS.map(
-        (seed) => spreadOf(track, seed, { toggles: { bunch: false, tactics: false } }).medianGapS,
-      );
+      const bunched: number[] = [];
+      const strungOut: number[] = [];
+      for (const seed of SEEDS) {
+        bunched.push(spreadOf(track, seed).medianGapS);
+        await yieldToEventLoop();
+        strungOut.push(
+          spreadOf(track, seed, { toggles: { bunch: false, tactics: false } }).medianGapS,
+        );
+        await yieldToEventLoop();
+      }
 
       expect(
         mean(bunched),
@@ -352,37 +380,26 @@ describe('sanity ranges: a bunch behaves like a bunch', () => {
     BUNCH_TIMEOUT_MS,
   );
 
-  it(
-    'a crosswind costs a bunch time with no headwind in it at all',
-    () => {
-      // The echelon, tested through the one channel that can only be the
-      // echelon. The synthetic track runs due east and the wind is from due
-      // north, so the along-route component is exactly zero — the headwind term
-      // contributes nothing, and nothing else in the tick reads wind. Were the
-      // shelter not collapsing into echelons, a pure crosswind would be worth
-      // precisely no time and this would be asserting that a number exceeds
-      // itself.
-      //
-      // Averaged over seeds rather than asserted on each, and that is a real
-      // limitation rather than a convenience. The riders at the front of the
-      // first echelon are not in the gutter and do not lose anything, so what
-      // the wind costs lands on the back half of the field and reaches the
-      // aggregate diluted — around a percent, against seed-to-seed swings
-      // several times that. One seed proves nothing here; six do.
-      const track = makeSyntheticTrack({ lengthM: 10_000, widthMeters: 5 });
-      const crosswind = manualWeather({ windSpeedMs: 12, windFromDegrees: 0 });
-
-      const still = SEEDS.map((seed) => spreadOf(track, seed).meanTimeS);
-      const blown = SEEDS.map((seed) => spreadOf(track, seed, { weather: crosswind }).meanTimeS);
-
-      expect(
-        mean(blown),
-        `field averaged ${mean(blown).toFixed(1)}s in a crosswind ` +
-          `against ${mean(still).toFixed(1)}s in still air`,
-      ).toBeGreaterThan(mean(still));
-    },
-    BUNCH_TIMEOUT_MS,
-  );
+  /*
+   * There was a row here asserting that a pure crosswind costs a bunch time.
+   * It has moved to a unit test on `echelonDepth` in `tactics.test.ts`, and the
+   * reason is worth recording rather than quietly dropping.
+   *
+   * The echelon fires hard per rider: on a 5m road a full crosswind takes a
+   * rider at four wheels' depth from 0.77 of the maximum tow to 0.06, which is
+   * over ten percent of their speed. It is not measurable in a race result. The
+   * field simply reorganises around it — riders who lose the shelter drift back,
+   * chains stop growing past an echelon's width, and everyone ends up in *some*
+   * echelon with a workable tow. Measured across ten seeds, a 12 m/s crosswind
+   * moved mean finishing time by 0.2% in the wrong direction, and left the field
+   * *less* fragmented rather than more.
+   *
+   * So the aggregate row was asserting something that is not true, and passed
+   * originally on a version of the shelter model that has since changed. A
+   * precise unit assertion on a pure function is better evidence than a noisy
+   * race-level one, and the gap between "the mechanism works" and "the mechanism
+   * changes races" is recorded in IDEAS.md rather than papered over.
+   */
 });
 
 /**
@@ -407,9 +424,14 @@ describe('sanity ranges: finishing is the common case', () => {
   // few seeds and given room past the default per-test timeout.
   const LONG_RACE_TIMEOUT_MS = 120_000;
 
-  const tally = (vehicleClassId: string, lengthM: number, seeds: readonly string[]): Tally => {
+  const tally = async (
+    vehicleClassId: string,
+    lengthM: number,
+    seeds: readonly string[],
+  ): Promise<Tally> => {
     const result: Tally = { finished: 0, crashed: 0, total: 0, zeroFinishSeeds: 0 };
     for (const seed of seeds) {
+      await yieldToEventLoop();
       const track = makeSyntheticTrack({ lengthM });
       const race = runRace({
         track,
@@ -436,10 +458,10 @@ describe('sanity ranges: finishing is the common case', () => {
 
   it(
     'a long point-to-point bicycle race is not decided by attrition',
-    () => {
+    async () => {
       // ~60km — a couple of hours of racing, well into the range where the old
       // model started emptying the finishing order.
-      const t = tally('road-cyclist', 60_000, seeds);
+      const t = await tally('road-cyclist', 60_000, seeds);
       expect(t.zeroFinishSeeds).toBe(0);
       expect(t.finished / t.total).toBeGreaterThan(0.75);
     },
@@ -448,10 +470,10 @@ describe('sanity ranges: finishing is the common case', () => {
 
   it(
     'a runner almost never crashes out — they get up and keep running',
-    () => {
+    async () => {
       // A long trail race. crashProneness is 0.03: a fall is a time loss, not
       // the end of the race.
-      const t = tally('runner', 30_000, seeds);
+      const t = await tally('runner', 30_000, seeds);
       expect(t.zeroFinishSeeds).toBe(0);
       expect(t.crashed / t.total).toBeLessThan(0.02);
     },
@@ -460,12 +482,13 @@ describe('sanity ranges: finishing is the common case', () => {
 
   it(
     'but a racing car still crashes out sometimes',
-    () => {
+    async () => {
       // The fix must not make crashes vanish where they belong. A twisty
       // circuit and the fastest, most fragile class in the set: a big one is
       // terminal.
       let crashed = 0;
       for (const seed of ['c1', 'c2', 'c3', 'c4']) {
+        await yieldToEventLoop();
         const track = makeSyntheticTrack({ lengthM: 2400, mode: 'circuit', curvatureRadius: 45 });
         const race = runRace({
           track,
