@@ -1,9 +1,24 @@
-import { useCallback, useEffect } from 'react';
-import type { ElevationProvider, LatLng, RoutingProfile, RoutingProvider, Track, TrackMode } from '@anywhererace/core';
+import { useCallback, useEffect, useState } from 'react';
+import type {
+  ElevationProvider,
+  GeocodingProvider,
+  LatLng,
+  Place,
+  RoutingErrorKind,
+  RoutingProfile,
+  RoutingProvider,
+  Track,
+  TrackMode,
+} from '@anywhererace/core';
+import { ZOOM_FOR_KIND } from '@anywhererace/core';
+import type { LegalLoopError, LegalLoopFix } from '@anywhererace/track';
 import { BuilderMap } from './BuilderMap';
+import type { MapFocus } from './BuilderMap';
 import { ElevationProfile } from './ElevationProfile';
+import { MapSearch } from './MapSearch';
 import { useTrackBuilder } from '../../useTrackBuilder';
 import type { BuilderLeg } from '../../useTrackBuilder';
+import { UnitToggle, useUnits } from '../../units';
 
 /**
  * The track builder.
@@ -18,6 +33,12 @@ import type { BuilderLeg } from '../../useTrackBuilder';
 export type TrackBuilderProps = {
   routing: RoutingProvider;
   elevation: ElevationProvider;
+  /**
+   * Place search, for getting to where you want to draw. Optional: without it
+   * the box simply is not offered, which is a better answer than a search field
+   * that never finds anything.
+   */
+  geocoding?: GeocodingProvider | undefined;
   styleUrl: string;
   attribution: string;
   initialCenter?: LatLng;
@@ -35,6 +56,7 @@ const DEFAULT_ZOOM = 14;
 export const TrackBuilder = ({
   routing,
   elevation,
+  geocoding,
   styleUrl,
   attribution,
   initialCenter = DEFAULT_CENTER,
@@ -45,6 +67,24 @@ export const TrackBuilder = ({
 }: TrackBuilderProps) => {
   const builder = useTrackBuilder({ routing, elevation });
   const { actions } = builder;
+  const units = useUnits();
+
+  // A fresh object per selection, so picking the same place twice moves the
+  // camera twice — a user who has panned away since expects it to go back.
+  const [focus, setFocus] = useState<MapFocus | undefined>(undefined);
+  const goTo = useCallback((place: Place) => {
+    setFocus({
+      center: place.center,
+      zoom: ZOOM_FOR_KIND[place.kind],
+      // Framing the extent is right for a town or a region and wrong for a
+      // country, because a country's extent includes everything it governs:
+      // Portugal's bounding box reaches the Azores, France's reaches French
+      // Guiana, and fitting either drops the user in an empty ocean halfway to
+      // somewhere they did not ask for. A country's own point is on the
+      // mainland, so a fixed continental zoom on it is the answer they meant.
+      bounds: place.kind === 'country' ? undefined : place.bounds,
+    });
+  }, []);
 
   // Keyboard undo/redo. Standard bindings, including the Windows-style
   // Ctrl+Y that a lot of people reach for.
@@ -83,11 +123,14 @@ export const TrackBuilder = ({
           <h1 className="text-sm font-semibold uppercase tracking-wider text-[#8d9bb0]">
             Track builder
           </h1>
-          {onCancel === undefined ? null : (
-            <button type="button" onClick={onCancel} className={ghostButton}>
-              Close
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <UnitToggle />
+            {onCancel === undefined ? null : (
+              <button type="button" onClick={onCancel} className={ghostButton}>
+                Close
+              </button>
+            )}
+          </div>
         </div>
 
         {degradedNotice === undefined ? null : (
@@ -150,6 +193,15 @@ export const TrackBuilder = ({
           onRemove={actions.removeWaypoint}
         />
 
+        {builder.failedLegs.length === 0 ? null : (
+          <LegalLoopHelper
+            failed={builder.failedLegs}
+            searching={builder.searching}
+            onSearch={actions.findLegalLoop}
+            units={units}
+          />
+        )}
+
         <div className="flex gap-1">
           <button type="button" onClick={actions.undo} disabled={!builder.canUndo} className={ghostButton}>
             Undo
@@ -170,9 +222,7 @@ export const TrackBuilder = ({
         <dl className="grid grid-cols-2 gap-x-2 gap-y-1 text-sm tabular-nums">
           <dt className="text-[#8d9bb0]">Length</dt>
           <dd className="text-right">
-            {builder.preview === undefined
-              ? '—'
-              : `${(builder.preview.lengthMeters / 1000).toFixed(2)} km`}
+            {builder.preview === undefined ? '—' : units.distance(builder.preview.lengthMeters)}
           </dd>
           <dt className="text-[#8d9bb0]">Corners</dt>
           <dd className="text-right">{builder.preview?.cornerCount ?? '—'}</dd>
@@ -180,9 +230,25 @@ export const TrackBuilder = ({
           <dd className="text-right">
             {builder.preview === undefined || !Number.isFinite(builder.preview.tightestRadiusM)
               ? '—'
-              : `${Math.round(builder.preview.tightestRadiusM)} m`}
+              : units.shortDistance(builder.preview.tightestRadiusM)}
           </dd>
         </dl>
+
+        {builder.mode !== 'circuit' || builder.routed === undefined ? null : (
+          <div className="flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="text-[#8d9bb0]">
+              Start line{' '}
+              {builder.startLineM === 0
+                ? 'at the first waypoint'
+                : `${units.distance(builder.startLineM)} along`}
+            </span>
+            {builder.startLineM === 0 ? null : (
+              <button type="button" onClick={() => actions.setStartLine(0)} className={ghostButton}>
+                Reset
+              </button>
+            )}
+          </div>
+        )}
 
         <ElevationProfile preview={builder.preview} loading={builder.previewing} />
 
@@ -202,6 +268,8 @@ export const TrackBuilder = ({
         </button>
         <p className="text-[11px] leading-snug text-[#8d9bb0]">
           Click the map to add a waypoint, drag one to move it, click a waypoint to remove it.
+          Drag the small handle in the middle of a leg to add a waypoint there instead of at
+          the end.
         </p>
       </aside>
 
@@ -213,10 +281,20 @@ export const TrackBuilder = ({
           attribution={attribution}
           initialCenter={initialCenter}
           initialZoom={initialZoom}
+          focus={focus}
+          routedPolyline={builder.routed?.polyline}
+          startLineM={builder.startLineM}
+          {...(builder.mode === 'circuit' ? { onMoveStartLine: actions.setStartLine } : {})}
           onAddWaypoint={actions.addWaypoint}
+          onInsertWaypoint={actions.insertWaypoint}
           onMoveWaypoint={actions.moveWaypoint}
           onRemoveWaypoint={actions.removeWaypoint}
         />
+        {geocoding === undefined ? null : (
+          <div className="absolute left-4 top-4 z-10">
+            <MapSearch geocoding={geocoding} onSelect={goTo} />
+          </div>
+        )}
         {builder.waypoints.length === 0 ? (
           <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
             <p className="rounded-full border border-[#2b3543] bg-[#161b24]/90 px-4 py-2 text-sm text-[#8d9bb0] backdrop-blur">
@@ -225,6 +303,95 @@ export const TrackBuilder = ({
           </div>
         ) : null}
       </div>
+    </div>
+  );
+};
+
+/**
+ * The "find nearest legal loop" helper CLAUDE.md asks for.
+ *
+ * Only appears when a leg will not route, because until then there is nothing
+ * to find.
+ *
+ * The explanation is chosen from what the router actually said. A one-way
+ * network is the case CLAUDE.md describes and the most interesting one, but it
+ * is not the only way a leg fails, and telling a user their problem is a
+ * one-way street when their waypoint is simply nowhere near a road sends them
+ * looking in the wrong place. A user who understands *why* their block will not
+ * close can usually fix it faster than the search can.
+ *
+ * Every outcome is reported, including the two that are not successes. A
+ * search that exhausted its budget and a router that stopped answering mean
+ * completely different things — the first says "not near here", the second
+ * says nothing at all about the loop — and collapsing them into "could not
+ * find a loop" would tell the user their route is impossible when it is not.
+ */
+const BREAK_CAUSE: Record<RoutingErrorKind, string> = {
+  'illegal-direction':
+    'On a one-way network a loop has to run in a single direction, so a block can be three-quarters possible and still not close.',
+  'point-not-snappable':
+    'A waypoint is too far from any road or path for the router to start from.',
+  'no-route': 'There is no legal way to get between these two points on this profile.',
+  'unsupported-profile': 'The router does not support this travel profile.',
+  'provider-unavailable':
+    'The routing service is not answering, so this may not be a problem with your route at all.',
+};
+
+const LegalLoopHelper = ({
+  failed,
+  searching,
+  onSearch,
+  units,
+}: {
+  failed: readonly BuilderLeg[];
+  searching: { tried: number; budget: number } | undefined;
+  onSearch: () => Promise<{ fix: LegalLoopFix } | { error: LegalLoopError }>;
+  units: ReturnType<typeof useUnits>;
+}) => {
+  const [outcome, setOutcome] = useState<string | undefined>(undefined);
+  const breaks = failed.length;
+
+  // The first failure's kind, which is the right one to explain: they are
+  // almost always the same cause, and leading with a list of maybes helps
+  // nobody.
+  const kind = failed[0]?.status.state === 'failed' ? failed[0].status.error.kind : undefined;
+  const cause = kind === undefined ? '' : BREAK_CAUSE[kind];
+
+  const run = useCallback(() => {
+    setOutcome(undefined);
+    void onSearch().then((result) => {
+      if ('error' in result) {
+        setOutcome(result.error.message);
+        return;
+      }
+      const { waypointIndex, movedByMeters, remainingBreaks } = result.fix;
+      setOutcome(
+        `Moved waypoint ${waypointIndex + 1} by ${units.shortDistance(movedByMeters)}.` +
+          (remainingBreaks === 0
+            ? ' The loop closes. Undo puts it back.'
+            : ` ${remainingBreaks} more leg${remainingBreaks > 1 ? 's' : ''} still will not route — run it again.`),
+      );
+    });
+  }, [onSearch, units]);
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded border border-[#ffb020]/40 bg-[#ffb020]/10 px-2 py-2">
+      <p className="text-[11px] leading-snug text-[#ffb020]">
+        {breaks === 1 ? 'One leg will not route' : `${breaks} legs will not route`}. {cause}
+      </p>
+      <button
+        type="button"
+        onClick={run}
+        disabled={searching !== undefined}
+        className="rounded bg-[#ffb020] px-2 py-1 text-xs font-semibold text-[#0b0e13] transition-colors hover:bg-[#ffc451] disabled:opacity-60"
+      >
+        {searching === undefined
+          ? 'Find the nearest legal loop'
+          : `Searching… ${searching.tried}/${searching.budget}`}
+      </button>
+      {outcome === undefined ? null : (
+        <p className="text-[11px] leading-snug text-[#e6ebf2]">{outcome}</p>
+      )}
     </div>
   );
 };

@@ -1,4 +1,6 @@
 import type { SeparationKind, SeparationPoint } from '@anywhererace/core';
+import { describeSeparation } from '../../separationCopy';
+import { useUnits } from '../../units';
 
 /**
  * Where this course could break the field up.
@@ -11,10 +13,10 @@ import type { SeparationKind, SeparationPoint } from '@anywhererace/core';
  * whatever the road does.
  *
  * The copy is careful to stay a claim about the *road*, never a prediction
- * about the race. Nothing in the simulation reads these points, no racer
- * behaves differently because of them, and two races over the same course will
- * not necessarily split in the same places or at all. Saying "this is where the
- * race will split" would be a promise the sim does not keep.
+ * about the race. The sim does read these points — they raise the odds a racer
+ * attacks here — but a reason to go is not a split, and two races over the same
+ * course will not necessarily come apart in the same places or at all. Saying
+ * "this is where the race will split" would be a promise the sim does not keep.
  */
 
 export type SeparationPointsProps = {
@@ -32,6 +34,8 @@ const KIND_LABEL: Record<SeparationKind, string> = {
 };
 
 export const SeparationPoints = ({ points, className = '' }: SeparationPointsProps) => {
+  const units = useUnits();
+
   if (points === undefined) {
     // Never analyzed is not the same as nothing found, and saying "no selection
     // points" about a course we never looked at would be a lie.
@@ -59,8 +63,8 @@ export const SeparationPoints = ({ points, className = '' }: SeparationPointsPro
           Where the bunch could come apart ({points.length})
         </h2>
         <p className="mt-0.5 text-[11px] leading-snug text-[#8d9bb0]">
-          Read from the road itself, strongest first. The simulation does not use these — a race
-          may split somewhere else, or never split at all.
+          Read from the road itself, strongest first. Riders are likelier to attack here — but a
+          race may split somewhere else, or never split at all.
         </p>
       </div>
 
@@ -71,12 +75,14 @@ export const SeparationPoints = ({ points, className = '' }: SeparationPointsPro
             className="flex items-baseline gap-2 rounded border border-[#2b3543] bg-[#161b24] px-2.5 py-1.5 text-xs"
           >
             <span className="w-14 shrink-0 tabular-nums text-[#8d9bb0]">
-              {formatKm(point.startM)}
+              {units.distance(point.startM)}
             </span>
             <span className="w-16 shrink-0 font-semibold uppercase text-[#4da3ff]">
               {KIND_LABEL[point.kind]}
             </span>
-            <span className="min-w-0 flex-1 text-[#e6ebf2]">{point.detail}</span>
+            <span className="min-w-0 flex-1 text-[#e6ebf2]">
+              {describeSeparation(point, units.system)}
+            </span>
             <SeverityBar severity={point.severity} />
           </li>
         ))}
@@ -102,5 +108,3 @@ const SeverityBar = ({ severity }: { severity: number }) => (
     />
   </span>
 );
-
-const formatKm = (meters: number): string => `${(meters / 1000).toFixed(2)} km`;

@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 import type { Track } from '@anywhererace/core';
+import type { SegmentHeat } from '@anywhererace/sim';
 import { positionOnTrack, trackBounds, trackToGeoJSON } from '@anywhererace/track';
+import { heatGeoJSON } from '../heatGeometry';
 import { buildMarkerImages, markerImageId } from '../markers';
 import { THEME } from '../palette';
 import type { FrameBuffer, RacerView } from '../useRaceClient';
@@ -25,6 +27,7 @@ import type { FrameBuffer, RacerView } from '../useRaceClient';
 const TRACK_SOURCE = 'race-track';
 const RACER_SOURCE = 'race-racers';
 const START_SOURCE = 'race-start-line';
+const HEAT_SOURCE = 'race-heat';
 
 export type RaceMapProps = {
   track: Track;
@@ -33,9 +36,21 @@ export type RaceMapProps = {
   /** MapLibre style URL. */
   styleUrl: string;
   attribution: string;
+  /**
+   * Where one racer gained and lost against the field, drawn over the route.
+   * Undefined leaves the track its plain colour.
+   */
+  heat?: SegmentHeat | undefined;
 };
 
-export const RaceMap = ({ track, racers, frameRef, styleUrl, attribution }: RaceMapProps) => {
+export const RaceMap = ({
+  track,
+  racers,
+  frameRef,
+  styleUrl,
+  attribution,
+  heat,
+}: RaceMapProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const racersRef = useRef(racers);
@@ -82,6 +97,21 @@ export const RaceMap = ({ track, racers, frameRef, styleUrl, attribution }: Race
     }
     addRacerLayers(map, racers);
   }, [racers]);
+
+  // --- the heat overlay ----------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined) return;
+
+    const apply = (): void => {
+      const source = map.getSource<GeoJSONSource>(HEAT_SOURCE);
+      if (source === undefined) return;
+      source.setData(heatGeoJSON(track, heat));
+    };
+
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [track, heat]);
 
   // --- the render loop -----------------------------------------------------
   useEffect(() => {
@@ -145,6 +175,27 @@ const addTrackLayers = (map: MapLibreMap, track: Track): void => {
     paint: {
       'line-color': THEME.trackLine,
       'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3, 18, 16],
+    },
+  });
+
+  // Above the route line and below the racers: the overlay is about the road,
+  // so it should colour the road, but it must never hide who is on it.
+  map.addSource(HEAT_SOURCE, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: `${HEAT_SOURCE}-line`,
+    type: 'line',
+    source: HEAT_SOURCE,
+    layout: { 'line-cap': 'butt', 'line-join': 'round' },
+    paint: {
+      // Colour is computed per band rather than through an expression, because
+      // the ramp is scaled to the race's own peak and MapLibre would need that
+      // peak baked into the stops anyway.
+      'line-color': ['get', 'color'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 18, 20],
+      'line-opacity': ['get', 'opacity'],
     },
   });
 

@@ -66,14 +66,33 @@ export type SeparationKind =
   | 'exposed';
 
 /**
+ * What the sweep actually measured at a separation point.
+ *
+ * Numbers rather than a sentence. The sweep runs once, when the course is
+ * saved, and the sentence a reader wants out of it depends on which units they
+ * read in — so the prose is assembled at render time and only the measurements
+ * are baked. Everything here is SI, like everything else stored.
+ *
+ * The length of the stretch is deliberately absent: it is `endM - startM` on
+ * the point itself, and storing it twice invites the two to disagree.
+ */
+export type SeparationDetail =
+  | { kind: 'climb'; meanGradient: number; gainM: number }
+  | { kind: 'narrows'; tightestWidthM: number }
+  | { kind: 'technical'; featureCount: number }
+  | { kind: 'surface'; surface: SurfaceType; assumed: boolean }
+  | { kind: 'exposed' };
+
+/**
  * A stretch of route where the field could plausibly come apart.
  *
  * Produced by a cheap sweep over the baked nodes at course-creation time. This
- * is an *observation about the road*, not a prediction about a race: nothing in
- * the sim reads it, no racer behaves differently because of it, and two races
- * over the same course will not necessarily split in the same places or at all.
- * It exists so a race director can look at a course and see where it is likely
- * to be decided.
+ * is an *observation about the road*, not a prediction about a race. The sim
+ * does read it — `profile.ts` flattens these into a per-node `attackAppeal`
+ * that racers roll against when deciding where to attack — but that is a reason
+ * to go, not an instruction to split, and two races over the same course will
+ * not necessarily break up in the same places or at all. It exists so a race
+ * director can look at a course and see where it is likely to be decided.
  */
 export type SeparationPoint = {
   /** Meters along the route where the feature begins. */
@@ -91,8 +110,15 @@ export type SeparationPoint = {
    * courses and not a probability.
    */
   severity: number;
-  /** One line of UI copy naming what the sweep actually found here. */
-  detail: string;
+  /**
+   * What was found here, as measurements.
+   *
+   * The bare `string` arm is the pre-unit-toggle shape: courses saved when the
+   * sweep baked its own prose are still sitting in browsers, and IndexedDB
+   * keeps whatever was written. Those render verbatim, in the metric they were
+   * baked in. Nothing new ever writes one.
+   */
+  detail: SeparationDetail | string;
 };
 
 /**

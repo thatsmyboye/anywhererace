@@ -33,6 +33,10 @@ export type ResultsPanelProps = {
   racersById: ReadonlyMap<string, RacerView>;
   trackName: string;
   onDismiss: () => void;
+  /** Whose heat map the track behind this panel is showing, if anyone's. */
+  heatRacerId?: string | undefined;
+  /** Called with a racer id to show their heat map, or undefined to clear it. */
+  onHeatRacer?: ((racerId: string | undefined) => void) | undefined;
   /** Rendered in the header — a save button, a share link later. */
   actions?: React.ReactNode;
   /**
@@ -49,6 +53,8 @@ export const ResultsPanel = ({
   racersById,
   trackName,
   onDismiss,
+  heatRacerId,
+  onHeatRacer,
   actions,
   versionMismatch,
 }: ResultsPanelProps) => {
@@ -100,7 +106,12 @@ export const ResultsPanel = ({
           </p>
         )}
 
-        <Classification result={result} racersById={racersById} />
+        <Classification
+          result={result}
+          racersById={racersById}
+          heatRacerId={heatRacerId}
+          onHeatRacer={onHeatRacer}
+        />
 
         <section className="flex flex-col gap-1">
           <h3 className={sectionHeading}>Race report</h3>
@@ -158,12 +169,22 @@ export const ResultsPanel = ({
 const Classification = ({
   result,
   racersById,
+  heatRacerId,
+  onHeatRacer,
 }: {
   result: RaceResult;
   racersById: ReadonlyMap<string, RacerView>;
+  heatRacerId?: string | undefined;
+  onHeatRacer?: ((racerId: string | undefined) => void) | undefined;
 }) => (
   <section className="flex flex-col gap-1">
     <h3 className={sectionHeading}>Classification</h3>
+    {onHeatRacer === undefined ? null : (
+      <p className="text-[11px] leading-snug text-[#8d9bb0]">
+        Pick a racer to colour the track with where they gained and lost time against the
+        field. The map is behind this panel, so choosing one takes you back to it.
+      </p>
+    )}
     <div className="overflow-hidden rounded-lg border border-[#2b3543]">
       <table className="w-full border-collapse text-sm">
         <thead>
@@ -179,10 +200,22 @@ const Classification = ({
           {result.finishers.map((finisher) => {
             const racer = racersById.get(finisher.racerId);
             const retired = isRetirement(finisher.status);
+            const selected = heatRacerId === finisher.racerId;
             return (
               <tr
                 key={finisher.racerId}
-                className={`border-b border-[#2b3543]/50 last:border-b-0 ${retired ? 'opacity-50' : ''}`}
+                onClick={
+                  onHeatRacer === undefined
+                    ? undefined
+                    : () => onHeatRacer(selected ? undefined : finisher.racerId)
+                }
+                aria-selected={selected}
+                className={[
+                  'border-b border-[#2b3543]/50 last:border-b-0',
+                  retired ? 'opacity-50' : '',
+                  onHeatRacer === undefined ? '' : 'cursor-pointer hover:bg-[#1f2632]',
+                  selected ? 'bg-[#4da3ff]/15' : '',
+                ].join(' ')}
               >
                 <td className="px-2 py-1 tabular-nums text-[#8d9bb0]">{finisher.position}</td>
                 <td className="px-2 py-1">
@@ -193,6 +226,11 @@ const Classification = ({
                     <span className="truncate text-[#e6ebf2]">
                       {racer?.name ?? finisher.racerId}
                     </span>
+                    {selected ? (
+                      <span className="shrink-0 text-[10px] uppercase tracking-wide text-[#4da3ff]">
+                        On the map
+                      </span>
+                    ) : null}
                   </span>
                 </td>
                 <td className="px-2 py-1 text-right tabular-nums">

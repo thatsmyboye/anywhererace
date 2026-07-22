@@ -1,7 +1,7 @@
 import type { RacerId } from '@anywhererace/core';
 import type { LapEvent, RaceEvent, SectorEvent } from './events';
 import { eventsOfType } from './events';
-import type { FinishRecord, RaceResult, RacerStatus } from './types';
+import type { FinishRecord, RaceResult, RacerStatus, SegmentTiming } from './types';
 
 /**
  * Reading a race back out of its event log.
@@ -256,6 +256,88 @@ export const buildIncidentTimeline = (events: readonly RaceEvent[]): Incident[] 
   }
 
   return incidents.sort((a, b) => a.tick - b.tick);
+};
+
+// --- where a racer gained and lost ------------------------------------------
+
+export type SegmentHeatBand = {
+  /** Meters along the lap. Lap-relative, so it is the same road on every lap. */
+  startM: number;
+  endM: number;
+  /**
+   * Seconds this racer lost against the field through this stretch, per lap of
+   * it. Negative means they gained. Zero means they were the field.
+   */
+  deltaS: number;
+};
+
+export type SegmentHeat = {
+  racerId: RacerId;
+  bands: SegmentHeatBand[];
+  /**
+   * The largest `|deltaS|` present, so a color ramp can be scaled to this race
+   * rather than to an absolute scale that would render a close race blank and a
+   * processional one saturated end to end.
+   */
+  peakS: number;
+};
+
+/**
+ * Where one racer gained and lost time against the field.
+ *
+ * The reference is the **median** of every racer's mean time through the band,
+ * not the mean of it. One rider crawling through a corner after a spin would
+ * drag a mean far enough to paint that corner slow for everybody else, which is
+ * precisely backwards: their mistake was theirs, not the road's.
+ *
+ * Bands the racer never rode end to end are absent rather than zero. A retired
+ * racer has nothing to say about the half of the lap they never reached, and
+ * drawing that as "level with the field" would be a claim the data cannot make.
+ */
+export const buildSegmentHeat = (
+  timing: SegmentTiming,
+  racerId: RacerId,
+): SegmentHeat | undefined => {
+  const mine = timing.perRacer.find((entry) => entry.racerId === racerId);
+  if (mine === undefined) return undefined;
+
+  const bands: SegmentHeatBand[] = [];
+  let peakS = 0;
+
+  for (let index = 0; index < timing.segmentCount; index++) {
+    const passes = mine.passes[index] ?? 0;
+    if (passes === 0) continue;
+
+    const reference = medianBandTime(timing, index);
+    if (reference === undefined) continue;
+
+    const deltaS = (mine.totalS[index] ?? 0) / passes - reference;
+    if (Math.abs(deltaS) > peakS) peakS = Math.abs(deltaS);
+    bands.push({
+      startM: index * timing.segmentLengthM,
+      endM: (index + 1) * timing.segmentLengthM,
+      deltaS,
+    });
+  }
+
+  return { racerId, bands, peakS };
+};
+
+/** Median of every racer's mean time through one band. Undefined if nobody rode it. */
+const medianBandTime = (timing: SegmentTiming, index: number): number | undefined => {
+  const means: number[] = [];
+  for (const entry of timing.perRacer) {
+    const passes = entry.passes[index] ?? 0;
+    if (passes === 0) continue;
+    means.push((entry.totalS[index] ?? 0) / passes);
+  }
+  if (means.length === 0) return undefined;
+
+  means.sort((a, b) => a - b);
+  const middle = Math.floor(means.length / 2);
+  return means.length % 2 === 1
+    ? (means[middle] as number)
+    : ((means[middle - 1] as number) + (means[middle] as number)) / 2;
 };
 
 // --- helpers the UI and the narrative both want -----------------------------

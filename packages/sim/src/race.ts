@@ -8,6 +8,7 @@ import { GroupTracker, classifyPass } from './groups';
 import { hashResult } from './hash';
 import type { TrackProfile, WindProfile } from './profile';
 import { buildTrackProfile, buildWindProfile, windAt } from './profile';
+import { SegmentTimer } from './segments';
 import type { RaceSetup, RacerRuntime } from './setup';
 import { prepareRace } from './setup';
 import type { Traffic } from './tick';
@@ -88,6 +89,13 @@ class Race implements RaceRunner {
    * and the other one cannot afford to be. See both files.
    */
   private readonly groups = new GroupTracker();
+  /**
+   * Time per racer per stretch of road. Bookkeeping only — it reads distances
+   * that have already been decided and nothing reads it back, so like `groups`
+   * it cannot move a result. Unlike `groups` it is not even observed by the
+   * event log; it goes straight onto the result for the heat map to read.
+   */
+  private readonly segments: SegmentTimer;
   /** Last tick's ordering among racers still circulating, by racer id. */
   private previousRanks = new Map<string, number>();
 
@@ -107,6 +115,10 @@ class Race implements RaceRunner {
     this.wind = buildWindProfile(setup.config.weather, setup.expectedDurationS);
     this.mechanicalHazardPerTick = mechanicalHazard(setup);
     this.crashDnfChanceValue = crashDnfChance(setup);
+    this.segments = new SegmentTimer(
+      setup.lapLengthM,
+      setup.racers.map((r) => r.spec.id),
+    );
 
     this.events.push({
       type: 'race-start',
@@ -183,7 +195,14 @@ class Race implements RaceRunner {
 
     for (let i = 0; i < this.setup.racers.length; i++) {
       const racer = this.setup.racers[i] as RacerRuntime;
-      this.checkLines(racer, previousDistances[i] as number);
+      const previousM = previousDistances[i] as number;
+      this.checkLines(racer, previousM);
+      // Only while they are actually racing: a finished or retired racer sits
+      // at one distance forever, and booking that against a band would report
+      // a stretch of road as infinitely slow.
+      if (racer.status === 'racing') {
+        this.segments.record(racer.spec.id, previousM, racer.distanceM, TICK_SECONDS);
+      }
     }
 
     this.assignPositions();
@@ -539,6 +558,10 @@ class Race implements RaceRunner {
       durationS: this.elapsedS,
       totalTicks: this.currentTick,
       finishers,
+      segments: this.segments.build(),
+      // Finishers only. The segment timing is derived from a race the finishing
+      // order already pins down, and hashing it would tie the goldens to a
+      // display resolution that has nothing to do with the physics.
       resultHash: hashResult(finishers),
     });
   }

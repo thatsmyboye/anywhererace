@@ -62,6 +62,7 @@ Read these before writing any code. Violating them causes rework.
 | Map render | MapLibre GL JS | Free, vector tiles, no Mapbox billing |
 | Tiles | Protomaps or MapTiler free tier | Swappable behind `TileProvider` |
 | Routing / snap-to-route | **Valhalla** (self-hosted or FOSSGIS public) | Behind `RoutingProvider` interface. Chosen over OSRM because we need multiple travel profiles *and* turn restrictions in one engine — see "Routing profiles" below |
+| Place search | Nominatim (OSM) | Behind `GeocodingProvider`. Towns and countries only, never streets or landmarks — it exists to point the map at where you want to draw. Alone among the providers it has **no fallback**; see below |
 | Elevation | **Open-Meteo elevation** (Copernicus GLO-90) | Cached per track, never re-fetched. Open-Topo-Data's SRTM 30m is the better dataset and sends no CORS headers, so it cannot be called from a browser at all — see `openmeteo-elevation.ts` |
 | Weather | Open-Meteo | Free, no key, forecast + historical |
 | Persistence | IndexedDB (Dexie) local-first; Supabase optional for sync/sharing | Sim must work fully offline once a track is saved |
@@ -123,8 +124,8 @@ type Track = {
   nodes: TrackNode[];           // BAKED — regenerate whenever polyline changes
   separationPoints?: SeparationPoint[];  // BAKED — see "Separation points"
   lengthMeters: number;
-  startLine: number;            // distance along route
-  finishLine: number;
+  startLine: number;            // distance along route; user-placeable on circuits
+  finishLine: number;           // always startLine + lengthMeters on a circuit
   sectors: number[];            // distances splitting the lap into 3 sectors
 };
 
@@ -165,11 +166,11 @@ type SeparationPoint = {
   endM: number;          // always > startM; may exceed lap length if it wraps the line
   kind: SeparationKind;
   severity: number;      // 0-1, for ranking within one course only
-  detail: string;        // one line of UI copy
+  detail: SeparationDetail | string;  // the measurements; see below
 };
 ```
 
-Four rules govern it:
+Five rules govern it:
 
 1. **It is an observation about the road, not a prediction about a race.** It says where
    a field *could* come apart, never where one will. The sim does read it — `profile.ts`
@@ -194,6 +195,14 @@ Four rules govern it:
    sweep; empty means it was analyzed and the road is flat, wide and smooth. Never
    collapse the two — telling a user a course has no selection points when nobody ever
    looked is a lie the UI can easily tell by accident.
+5. **It emits measurements, not prose.** `detail` carries the numbers behind the point —
+   mean gradient and height gained, tightest width, feature count, surface — and the
+   sentence is assembled at render time by `describeSeparation` in `packages/ui`. A
+   course is baked once and has to read correctly for someone in miles and someone in
+   kilometers, which a string frozen at bake time cannot do. The bare `string` arm is
+   the pre-toggle shape, still in browsers that saved a track before this changed;
+   those render verbatim, in the metric they were baked in, and nothing writes a new
+   one.
 
 ### Routing profiles and legality
 
@@ -211,9 +220,21 @@ type RoutingProfile =
 
 1. **Circuits get much harder.** A one-way network means a closed loop must be
    traversable in a single direction. A user who drops four corners of a city block may
-   find three of the four streets run the wrong way. The builder must route each leg as
-   the user places it, show failures immediately at the offending leg, and offer a
-   "find nearest legal loop" helper rather than failing silently at save time.
+   find three of the four streets run the wrong way. The builder routes each leg as the
+   user places it, shows failures at the offending leg, and offers the "find nearest
+   legal loop" helper rather than failing silently at save time.
+
+   The helper lives in `packages/track/src/legalLoop.ts` and is a bounded spiral, not a
+   solver: it nudges the endpoints of a broken leg outward ring by ring, nearest first,
+   and gives up inside a fixed request budget. Every candidate costs a call to a free
+   shared router, so exhaustiveness is not on offer — and *nearest first* is
+   load-bearing, since a helper that silently relocated a corner three hundred meters
+   to save two requests would not be a helper. Three things it must keep doing: report
+   an outage as an outage rather than as "no such loop"; say how many breaks a single
+   move could not reach, because moving one waypoint only fixes the legs that touch it;
+   and apply the move through the ordinary edit path so Ctrl+Z puts it back. The panel's
+   explanation is chosen from the router's own error kind — blaming a one-way street for
+   a waypoint that is nowhere near a road sends the user looking in the wrong place.
 
 2. **Profile is chosen at track-build time, vehicle at race-setup time.** These can
    conflict. Store `routingProfile` on the track; at race setup, filter the vehicle list
@@ -516,7 +537,31 @@ to be in-bunch shuffling with nothing worth showing among them.
 
 1. **Track builder** — click to drop waypoints, drag to adjust, snapped route drawn
    live. Show length, elevation profile, and detected corner count. Toggle
-   circuit/point-to-point. Undo/redo. Save.
+   circuit/point-to-point. Undo/redo. Save. A place search over the map gets you to
+   the right part of the world without panning an ocean; it moves the camera and
+   does nothing else — no waypoint is placed, and a track never records the place
+   that was searched for.
+
+   A waypoint can go in the *middle* of a route as well as on the end: every leg
+   carries a ghost handle at its midpoint, and dragging one splits that leg in two.
+   The handle sits on the routed road rather than on the straight line between two
+   pins, because on any real leg those are nowhere near each other. `insertIndexForLeg`
+   in `packages/track/src/legs.ts` owns the one case that is easy to get wrong — a
+   circuit's closing leg runs back to waypoint 0, and splitting it inserts at the
+   *end* of the list, since inserting at 0 would move the start line instead.
+
+   **The start line is placeable, on circuits.** It was pinned to the first
+   waypoint, so a lap began wherever the user happened to click first — usually
+   mid-corner. A chequered marker now drags along the route and snaps back onto it
+   via `nearestPointOnPolyline`, because the line is a *distance along the road*
+   rather than a point beside it. Two invariants `placeLines` in `build.ts` keeps:
+   `finishLine` stays exactly one lap ahead of `startLine`, since the sim reads the
+   gap between them as the race distance and leaving the finish at the end of the
+   route would silently shorten a point-to-point; and sectors are placed relative
+   to the line so sector 1 always begins at it, stored absolute (and therefore
+   wrapping) because `setup.ts` rotates them back. Point-to-point routes ignore it
+   entirely — their start and finish *are* the ends of the route, and moving them
+   would be trimming it, which dragging the end waypoints already does.
 2. **Race setup** — vehicle class, laps, weather, field size, then a racer roster table
    where each row is name / color / personality / skill, with a "randomize field" button
    and the ability to save the roster as a reusable template.
@@ -582,7 +627,8 @@ this comparison.
 
 ### External services
 
-All three are optional at runtime and each falls back independently:
+All of them are optional at runtime. The first four fall back independently; place
+search deliberately does not, for the reason below.
 
 | Service | Used for | Without it |
 |---|---|---|
@@ -590,6 +636,20 @@ All three are optional at runtime and each falls back independently:
 | Valhalla (FOSSGIS public) | snapping routes to real roads | synthetic geometry, flagged in the UI |
 | Open-Meteo elevation | real gradients | synthetic hills, flagged in the UI |
 | Open-Meteo | the real forecast, baked at race creation | dry and still, flagged in the UI |
+| Nominatim | finding a town or country to draw in | **no fallback** — search says it is unavailable and the map stays put |
+
+**Place search has no fallback on purpose.** A synthetic DEM still gives you hills
+to race over and a synthetic router still gives you a road; a synthetic gazetteer
+would move the map to somewhere that is not the place the user named, under a name
+they trust. A mock exists in `providers/mock/geocoding.ts` for tests and is
+deliberately never wired into `createProviders`. Nominatim's usage policy caps us
+at one request a second, which is why `useMapSearch` debounces rather than
+searching per keystroke, and why every lookup carries an abort signal.
+
+Framing a result uses its bounding box, except for countries. A country's extent
+covers everything it governs — Portugal's box reaches the Azores, France's reaches
+French Guiana — so fitting it lands the user in an empty ocean. Countries get a
+fixed continental zoom on their own point, which is on the mainland.
 
 Only MapTiler needs a key: put it in `apps/web/.env.local` (gitignored; see
 `apps/web/.env.example`). It ships to the browser and so is public — restrict it
@@ -639,6 +699,15 @@ swapping a provider, test it from the page, not from a shell.
 - US English spelling throughout, including in code identifiers and UI copy.
 - SI units internally (meters, m/s, seconds, kelvin-free celsius). Convert only at the
   UI boundary. Suffix ambiguous variables: `speedMs`, `distanceM`, `lapTimeS`.
+- **The reader picks metric or imperial; nothing else ever asks.** `UnitsProvider` in
+  `packages/ui/src/units.tsx` holds the choice, remembers it in `localStorage` and
+  defaults from the browser's locale; `useUnits()` hands back formatters already bound
+  to it. The formatters themselves live in `packages/core/src/units.ts`, which is the
+  only place a conversion factor may appear. Nothing upstream of a render branches on
+  the system — that is what keeps a race shared by a reader in miles byte-identical to
+  the same race opened by a reader in kilometers. A number that reaches the screen from
+  a store, a sim result or a bake must therefore arrive in SI and be formatted there,
+  never formatted earlier and carried as a string.
 - Named exports only. No default exports.
 - Errors are typed results in the sim (`Result<T, SimError>`); exceptions only at the
   app boundary.
@@ -695,7 +764,22 @@ These are unresolved. Ask before assuming:
   report, then position-by-lap and lap-time charts, sector bests and the
   incident timeline. The narrative is assembled from the event log by template,
   never by a model — a shared race has to read identically for everyone, which
-  rules out anything non-deterministic.
+  rules out anything non-deterministic. Picking a racer in the classification
+  colours the track behind the panel with where they gained and lost, and
+  dismisses the panel, because the thing they asked to look at is underneath it.
+- **The heat map measures against the field's median, and the sim does the
+  timing.** `segments.ts` books every racer's time through each band of the lap
+  as the tick goes, because nothing downstream can: the event log records
+  moments rather than elapsed time per meter, and the frames the worker keeps
+  for scrubbing are downsampled and capped, so anything derived from them would
+  get coarser on exactly the long races where this is most interesting. It is
+  pure bookkeeping — no `Rng`, nothing reads it back, and it is deliberately not
+  in `resultHash`, so it cannot move the goldens. The reference is the *median*
+  of every racer's mean through a band rather than the mean of it, because one
+  rider crawling through a corner after a spin would otherwise paint that corner
+  slow for the whole field, which is exactly backwards. Bands a racer never rode
+  end to end are absent rather than zero: a retirement has nothing to say about
+  the half of the lap it never reached.
 - **Finished races are stored as inputs, not recordings.** A saved race keeps
   its track id, config, seed, `simVersion` and `resultHash`; reopening it
   re-runs the simulation. That is the same contract `SharedRace` needs, and it

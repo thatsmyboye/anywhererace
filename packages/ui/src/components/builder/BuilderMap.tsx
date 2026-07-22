@@ -1,7 +1,14 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap, MapMouseEvent } from 'maplibre-gl';
-import type { LatLng } from '@anywhererace/core';
+import type { LatLng, LatLngBounds } from '@anywhererace/core';
+import { interpolateLatLng } from '@anywhererace/core';
+import {
+  insertIndexForLeg,
+  midpointOfPolyline,
+  nearestPointOnPolyline,
+  pointAlongPolyline,
+} from '@anywhererace/track';
 import { THEME } from '../../palette';
 import type { BuilderLeg } from '../../useTrackBuilder';
 
@@ -22,6 +29,23 @@ import type { BuilderLeg } from '../../useTrackBuilder';
 const ROUTE_SOURCE = 'builder-route';
 const FAILED_SOURCE = 'builder-failed';
 
+/**
+ * Somewhere to point the camera, after the map already exists.
+ *
+ * Separate from `initialCenter` because they answer different questions:
+ * `initialCenter` is where the map opens, and changing it rebuilds the map,
+ * which would throw away the user's pan and zoom. This just moves the camera.
+ * A fresh object means "go there now", so selecting the same place twice moves
+ * the map twice — which is what a user who has since panned away expects.
+ */
+export type MapFocus = {
+  center: LatLng;
+  /** Used when there are no bounds to frame. */
+  zoom: number;
+  /** Preferred when present: framing the extent beats guessing a zoom. */
+  bounds?: LatLngBounds | undefined;
+};
+
 export type BuilderMapProps = {
   waypoints: readonly LatLng[];
   legs: readonly BuilderLeg[];
@@ -30,10 +54,30 @@ export type BuilderMapProps = {
   /** Where to open the map when there is nothing drawn yet. */
   initialCenter: LatLng;
   initialZoom: number;
+  /** Move the camera here. Nothing drawn is affected. */
+  focus?: MapFocus | undefined;
+  /**
+   * The routed line, concatenated. Needed to place the start line, which is a
+   * distance along the road rather than a waypoint.
+   */
+  routedPolyline?: readonly LatLng[] | undefined;
+  /** Where the lap starts, in meters along `routedPolyline`. Circuits only. */
+  startLineM?: number | undefined;
+  /** Called with a distance along the route when the start line is dragged. */
+  onMoveStartLine?: ((distanceM: number) => void) | undefined;
   onAddWaypoint: (point: LatLng) => void;
+  /** Put a new waypoint at `index`, splitting the leg it was dragged out of. */
+  onInsertWaypoint: (index: number, point: LatLng) => void;
   onMoveWaypoint: (index: number, point: LatLng) => void;
   onRemoveWaypoint: (index: number) => void;
 };
+
+/**
+ * Never frame a place closer than this, however small its bounds. A hamlet's
+ * bounding box can be two hundred meters across, and landing at zoom 18 puts
+ * the user inside a single junction with no idea which way the town runs.
+ */
+const MAX_FOCUS_ZOOM = 15;
 
 export const BuilderMap = ({
   waypoints,
@@ -42,18 +86,42 @@ export const BuilderMap = ({
   attribution,
   initialCenter,
   initialZoom,
+  focus,
+  routedPolyline,
+  startLineM,
+  onMoveStartLine,
   onAddWaypoint,
+  onInsertWaypoint,
   onMoveWaypoint,
   onRemoveWaypoint,
 }: BuilderMapProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const handleMarkersRef = useRef<maplibregl.Marker[]>([]);
 
   // Handlers are read through refs so the map is built once and never rebuilt
   // just because a callback identity changed.
-  const handlers = useRef({ onAddWaypoint, onMoveWaypoint, onRemoveWaypoint });
-  handlers.current = { onAddWaypoint, onMoveWaypoint, onRemoveWaypoint };
+  const startMarkerRef = useRef<maplibregl.Marker | undefined>(undefined);
+
+  const handlers = useRef({
+    onAddWaypoint,
+    onInsertWaypoint,
+    onMoveWaypoint,
+    onRemoveWaypoint,
+    onMoveStartLine,
+  });
+  handlers.current = {
+    onAddWaypoint,
+    onInsertWaypoint,
+    onMoveWaypoint,
+    onRemoveWaypoint,
+    onMoveStartLine,
+  };
+  // Read through a ref for the same reason: the drag handler is bound once,
+  // and the line it snaps to changes every time a waypoint moves.
+  const routeRef = useRef(routedPolyline);
+  routeRef.current = routedPolyline;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -93,6 +161,25 @@ export const BuilderMap = ({
     // Style and attribution come from a provider chosen once at startup.
   }, [styleUrl, attribution, initialCenter.lat, initialCenter.lng, initialZoom]);
 
+  // --- camera --------------------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined || focus === undefined) return;
+
+    if (focus.bounds !== undefined) {
+      const { south, west, north, east } = focus.bounds;
+      map.fitBounds(
+        [
+          [west, south],
+          [east, north],
+        ],
+        { padding: 48, maxZoom: MAX_FOCUS_ZOOM },
+      );
+      return;
+    }
+    map.flyTo({ center: [focus.center.lng, focus.center.lat], zoom: focus.zoom });
+  }, [focus]);
+
   // --- waypoint markers ----------------------------------------------------
   useEffect(() => {
     const map = mapRef.current;
@@ -125,6 +212,111 @@ export const BuilderMap = ({
       markersRef.current = [];
     };
   }, [waypoints]);
+
+  // --- the start line ------------------------------------------------------
+  /**
+   * A draggable line marker, which snaps back onto the road wherever it is
+   * dropped.
+   *
+   * Start and finish used to be pinned to the first waypoint, which meant a
+   * circuit began wherever the user happened to click first — usually mid-
+   * corner. Being able to put the line on a straight is most of what makes a
+   * drawn loop raceable.
+   *
+   * Snapping is the whole gesture: the line is a *distance along the route*,
+   * so a marker dropped in a field has to be projected back onto the line
+   * before it means anything.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    startMarkerRef.current?.remove();
+    startMarkerRef.current = undefined;
+
+    if (map === undefined || onMoveStartLine === undefined) return;
+    const route = routedPolyline;
+    if (route === undefined || route.length < 2) return;
+
+    const at = pointAlongPolyline(route, startLineM ?? 0);
+    if (at === undefined) return;
+
+    const element = startLineElement();
+    const marker = new maplibregl.Marker({ element, draggable: true })
+      .setLngLat([at.lng, at.lat])
+      .addTo(map);
+
+    marker.on('dragend', () => {
+      const dropped = marker.getLngLat();
+      const line = routeRef.current;
+      const snapped =
+        line === undefined
+          ? undefined
+          : nearestPointOnPolyline(line, { lat: dropped.lat, lng: dropped.lng });
+      if (snapped === undefined) return;
+      // Put the marker on the road immediately rather than leaving it where it
+      // was dropped and waiting for the re-render, which reads as a snap.
+      marker.setLngLat([snapped.point.lng, snapped.point.lat]);
+      handlers.current.onMoveStartLine?.(snapped.distanceM);
+    });
+
+    startMarkerRef.current = marker;
+    return () => {
+      marker.remove();
+      startMarkerRef.current = undefined;
+    };
+  }, [routedPolyline, startLineM, onMoveStartLine]);
+
+  // --- insert handles ------------------------------------------------------
+  /**
+   * One ghost handle at the middle of every leg. Dragging it off the line puts
+   * a new waypoint there and splits the leg in two, which is the standard
+   * gesture for editing the middle of a route and the reason a long route no
+   * longer has to be cleared and redrawn to change one corner of it.
+   *
+   * Keyed off `legs` rather than `waypoints` because the handle belongs on the
+   * *road*, not on the straight line between two pins — on anything but a
+   * dead-straight leg those are nowhere near each other.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined) return;
+
+    for (const marker of handleMarkersRef.current) marker.remove();
+    handleMarkersRef.current = legs.flatMap((leg) => {
+      const at = handlePosition(leg);
+      if (at === undefined) return [];
+
+      const insertIndex = insertIndexForLeg(leg, waypoints.length);
+
+      const element = insertHandleElement(leg.status.state === 'failed');
+      const marker = new maplibregl.Marker({ element, draggable: true })
+        .setLngLat([at.lng, at.lat])
+        .addTo(map);
+
+      // A click on the handle lands after `dragend` in most browsers, so a drag
+      // would otherwise insert twice — once where it was dropped and once back
+      // at the midpoint it started from.
+      let draggedAtMs = 0;
+      marker.on('dragend', () => {
+        draggedAtMs = Date.now();
+        const { lat, lng } = marker.getLngLat();
+        handlers.current.onInsertWaypoint(insertIndex, { lat, lng });
+      });
+      element.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (Date.now() - draggedAtMs < 250) return;
+        // Clicking without dragging pins the route where it already runs,
+        // which is how you stop a later edit from rerouting this stretch.
+        handlers.current.onInsertWaypoint(insertIndex, at);
+      });
+
+      return [marker];
+    });
+
+    return () => {
+      for (const marker of handleMarkersRef.current) marker.remove();
+      handleMarkersRef.current = [];
+    };
+  }, [legs, waypoints.length]);
 
   // --- route geometry ------------------------------------------------------
   useEffect(() => {
@@ -236,6 +428,82 @@ const failedGeoJSON = (legs: readonly BuilderLeg[]): FeatureCollection => ({
       : [],
   ),
 });
+
+/**
+ * Where a leg's insert handle goes.
+ *
+ * On the routed road where there is one. A leg that failed to route has no
+ * geometry, and its straight dashed line is the only thing on screen to grab —
+ * which is exactly when inserting a waypoint is most useful, since a waypoint
+ * dropped part way along is how a user routes around whatever is blocking it.
+ */
+const handlePosition = (leg: BuilderLeg): LatLng | undefined =>
+  leg.status.state === 'ok'
+    ? midpointOfPolyline(leg.status.leg.polyline)
+    : interpolateLatLng(leg.from, leg.to, 0.5);
+
+/**
+ * The start/finish line. A chequered bar rather than a dot, because it is a
+ * *line across the road*, not a point on it — and it has to be distinguishable
+ * at a glance from the waypoint that happens to sit near it.
+ */
+const startLineElement = (): HTMLElement => {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.title = 'Drag along the route to move the start and finish line';
+  element.setAttribute('aria-label', 'Start and finish line. Drag along the route to move it.');
+  element.style.cssText = [
+    'width:22px',
+    'height:22px',
+    'border-radius:4px',
+    'cursor:grab',
+    `border:2px solid ${THEME.background}`,
+    'box-shadow:0 1px 4px rgba(0,0,0,.6)',
+    'padding:0',
+    // A two-by-two chequer, which reads as a finish line at any size.
+    `background-image:linear-gradient(45deg,${THEME.text} 25%,transparent 25%,transparent 75%,${THEME.text} 75%),linear-gradient(45deg,${THEME.text} 25%,transparent 25%,transparent 75%,${THEME.text} 75%)`,
+    'background-size:10px 10px',
+    'background-position:0 0,5px 5px',
+    `background-color:${THEME.background}`,
+  ].join(';');
+  return element;
+};
+
+/**
+ * A ghost handle at the middle of a leg. Deliberately smaller and dimmer than
+ * a waypoint: it is not part of the route the user drew, it is somewhere they
+ * *could* put one, and it must not be mistaken for a corner that already
+ * exists.
+ */
+const insertHandleElement = (onFailedLeg: boolean): HTMLElement => {
+  const element = document.createElement('button');
+  element.type = 'button';
+  element.textContent = '+';
+  element.title = 'Drag to add a waypoint here and split this leg';
+  element.setAttribute('aria-label', 'Add a waypoint in the middle of this leg');
+  element.style.cssText = [
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'width:16px',
+    'height:16px',
+    'border-radius:50%',
+    'font:700 12px/1 system-ui,sans-serif',
+    'cursor:grab',
+    `background:${onFailedLeg ? THEME.danger : THEME.text}`,
+    `color:${THEME.background}`,
+    `border:2px solid ${THEME.background}`,
+    'opacity:0.55',
+    'padding:0',
+  ].join(';');
+  element.addEventListener('mouseenter', () => {
+    element.style.opacity = '1';
+  });
+  element.addEventListener('mouseleave', () => {
+    element.style.opacity = '0.55';
+  });
+  return element;
+};
 
 /**
  * A waypoint marker. Built by hand rather than with MapLibre's default pin so

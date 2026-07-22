@@ -1,5 +1,6 @@
 import type { WeatherConditions } from '@anywhererace/core';
 import type { WeatherMode } from '../../useRaceSetup';
+import { useUnits } from '../../units';
 
 /**
  * Weather.
@@ -95,63 +96,87 @@ export const WeatherPicker = ({
         )}
       </div>
     ) : (
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-        <Slider
-          label="Temperature"
-          value={manualConditions.temperatureC}
-          min={-10}
-          max={45}
-          step={1}
-          format={(v) => `${v.toFixed(0)}°C`}
-          onChange={(temperatureC) => onManualChange({ ...manualConditions, temperatureC })}
-        />
-        <Slider
-          label="Rain"
-          value={manualConditions.precipitationMmPerHour}
-          min={0}
-          max={10}
-          step={0.5}
-          format={(v) => (v === 0 ? 'dry' : `${v.toFixed(1)} mm/h`)}
-          onChange={(precipitationMmPerHour) =>
-            onManualChange({ ...manualConditions, precipitationMmPerHour })
-          }
-        />
-        <Slider
-          label="Wind"
-          value={manualConditions.windSpeedMs}
-          min={0}
-          max={25}
-          step={0.5}
-          format={(v) => (v === 0 ? 'still' : `${v.toFixed(1)} m/s`)}
-          onChange={(windSpeedMs) => onManualChange({ ...manualConditions, windSpeedMs })}
-        />
-        <Slider
-          label="Wind from"
-          value={manualConditions.windFromDegrees}
-          min={0}
-          max={350}
-          step={10}
-          format={(v) => `${compass(v)} (${v.toFixed(0)}°)`}
-          onChange={(windFromDegrees) => onManualChange({ ...manualConditions, windFromDegrees })}
-        />
-      </div>
+      <ManualConditions conditions={manualConditions} onChange={onManualChange} />
     )}
   </section>
 );
 
-const ConditionsSummary = ({ conditions }: { conditions: WeatherConditions }) => (
-  <p className="text-xs tabular-nums text-[#e6ebf2]">
-    {conditions.temperatureC.toFixed(0)}°C
-    <span className="mx-1.5 text-[#2b3543]">·</span>
-    {conditions.precipitationMmPerHour === 0
-      ? 'dry'
-      : `${conditions.precipitationMmPerHour.toFixed(1)} mm/h rain`}
-    <span className="mx-1.5 text-[#2b3543]">·</span>
-    {conditions.windSpeedMs.toFixed(1)} m/s from {compass(conditions.windFromDegrees)}
-    <span className="mx-1.5 text-[#2b3543]">·</span>
-    {Math.round(conditions.cloudCoverFraction * 100)}% cloud
-  </p>
-);
+/**
+ * The sliders stay in SI underneath — the value written into `WeatherConditions`
+ * is the same number whichever units are on screen, and only the readout beside
+ * each slider changes. Converting the *range* as well would give a reader in
+ * Fahrenheit a temperature slider that stopped at odd numbers.
+ */
+const ManualConditions = ({
+  conditions,
+  onChange,
+}: {
+  conditions: WeatherConditions;
+  onChange: (conditions: WeatherConditions) => void;
+}) => {
+  const units = useUnits();
+
+  return (
+    <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+      <Slider
+        label="Temperature"
+        value={conditions.temperatureC}
+        min={-10}
+        max={45}
+        step={1}
+        format={(v) => units.temperature(v)}
+        onChange={(temperatureC) => onChange({ ...conditions, temperatureC })}
+      />
+      <Slider
+        label="Rain"
+        value={conditions.precipitationMmPerHour}
+        min={0}
+        max={10}
+        step={0.5}
+        format={(v) => (v === 0 ? 'dry' : units.rain(v))}
+        onChange={(precipitationMmPerHour) =>
+          onChange({ ...conditions, precipitationMmPerHour })
+        }
+      />
+      <Slider
+        label="Wind"
+        value={conditions.windSpeedMs}
+        min={0}
+        max={25}
+        step={0.5}
+        format={(v) => (v === 0 ? 'still' : units.windSpeed(v))}
+        onChange={(windSpeedMs) => onChange({ ...conditions, windSpeedMs })}
+      />
+      <Slider
+        label="Wind from"
+        value={conditions.windFromDegrees}
+        min={0}
+        max={350}
+        step={10}
+        format={(v) => `${compass(v)} (${v.toFixed(0)}°)`}
+        onChange={(windFromDegrees) => onChange({ ...conditions, windFromDegrees })}
+      />
+    </div>
+  );
+};
+
+const ConditionsSummary = ({ conditions }: { conditions: WeatherConditions }) => {
+  const units = useUnits();
+
+  return (
+    <p className="text-xs tabular-nums text-[#e6ebf2]">
+      {units.temperature(conditions.temperatureC)}
+      <span className="mx-1.5 text-[#2b3543]">·</span>
+      {conditions.precipitationMmPerHour === 0
+        ? 'dry'
+        : `${units.rain(conditions.precipitationMmPerHour)} rain`}
+      <span className="mx-1.5 text-[#2b3543]">·</span>
+      {units.windSpeed(conditions.windSpeedMs)} from {compass(conditions.windFromDegrees)}
+      <span className="mx-1.5 text-[#2b3543]">·</span>
+      {Math.round(conditions.cloudCoverFraction * 100)}% cloud
+    </p>
+  );
+};
 
 const Slider = ({
   label,

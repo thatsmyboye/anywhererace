@@ -9,8 +9,14 @@ import type {
   Track,
   TrackMode,
 } from '@anywhererace/core';
-import type { TrackPreview } from '@anywhererace/track';
-import { bakeRoutedTrack, buildPreview, concatenateLegs } from '@anywhererace/track';
+import type { LegalLoopError, LegalLoopFix, TrackPreview } from '@anywhererace/track';
+import {
+  bakeRoutedTrack,
+  buildPreview,
+  concatenateLegs,
+  findNearestLegalLoop,
+  legPairsFor,
+} from '@anywhererace/track';
 import type { TrackError } from '@anywhererace/track';
 
 /**
@@ -50,6 +56,12 @@ export type BuilderSnapshot = {
   mode: TrackMode;
   routingProfile: RoutingProfile;
   waypoints: LatLng[];
+  /**
+   * Where the lap starts, in meters along the routed line. Circuits only —
+   * see `BakeRoutedInput.startLineM`. Kept in the snapshot rather than beside
+   * it so moving the line is an undoable edit like any other.
+   */
+  startLineM: number;
 };
 
 export type UseTrackBuilderOptions = {
@@ -69,6 +81,7 @@ const EMPTY: BuilderSnapshot = {
   mode: 'circuit',
   routingProfile: 'motor',
   waypoints: [],
+  startLineM: 0,
 };
 
 /**
@@ -101,6 +114,10 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<TrackError | undefined>(undefined);
+  /** Progress of a legal-loop search, while one is running. */
+  const [searching, setSearching] = useState<{ tried: number; budget: number } | undefined>(
+    undefined,
+  );
 
   /**
    * Routed legs, keyed by endpoints and profile. A waypoint dragged and then
@@ -150,6 +167,26 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
     [commit],
   );
 
+  /**
+   * Put a waypoint *between* two existing ones.
+   *
+   * Appending was the only way to build a route, so refining the middle of a
+   * long one meant clearing it and starting again. `index` is the position the
+   * new waypoint takes, so inserting into the leg from waypoint 2 to waypoint 3
+   * passes 3 — including the closing leg of a circuit, which inserts at the
+   * end because that is where the loop is reopened.
+   */
+  const insertWaypoint = useCallback(
+    (index: number, point: LatLng) =>
+      commit((current) => {
+        const at = Math.min(Math.max(index, 0), current.waypoints.length);
+        const waypoints = current.waypoints.slice();
+        waypoints.splice(at, 0, point);
+        return { ...current, waypoints };
+      }),
+    [commit],
+  );
+
   const removeWaypoint = useCallback(
     (index: number) =>
       commit((current) =>
@@ -161,7 +198,23 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
   );
 
   const setMode = useCallback(
-    (mode: TrackMode) => commit((current) => (current.mode === mode ? current : { ...current, mode })),
+    (mode: TrackMode) =>
+      commit((current) =>
+        current.mode === mode
+          ? current
+          : // A point-to-point starts where it starts, so a line placed on a
+            // circuit is meaningless once the loop is opened up. Dropping it
+            // here rather than ignoring it keeps the snapshot honest.
+            { ...current, mode, startLineM: mode === 'circuit' ? current.startLineM : 0 },
+      ),
+    [commit],
+  );
+
+  const setStartLine = useCallback(
+    (distanceM: number) =>
+      commit((current) =>
+        current.startLineM === distanceM ? current : { ...current, startLineM: distanceM },
+      ),
     [commit],
   );
 
@@ -211,7 +264,7 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
   // --- routing -------------------------------------------------------------
 
   const legPairs = useMemo(
-    () => buildLegPairs(snapshot.waypoints, snapshot.mode),
+    () => legPairsFor(snapshot.waypoints, snapshot.mode),
     [snapshot.waypoints, snapshot.mode],
   );
 
@@ -355,6 +408,7 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
           waypoints: snapshot.waypoints,
           routed: concatenateLegs(detailed),
           elevation,
+          startLineM: snapshot.startLineM,
         });
 
         if (!baked.ok) {
@@ -376,6 +430,36 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
     [legs],
   );
 
+  /**
+   * Search for a nudge that closes the loop, and apply it.
+   *
+   * The move goes through `moveWaypoint`, so it lands in the undo history like
+   * any other edit — a user who does not like where the helper put their corner
+   * can press Ctrl+Z, which is the only reasonable way for a feature that moves
+   * something on your behalf to behave.
+   */
+  const findLegalLoop = useCallback(async (): Promise<
+    { fix: LegalLoopFix } | { error: LegalLoopError }
+  > => {
+    setSearching({ tried: 0, budget: 1 });
+    try {
+      const result = await findNearestLegalLoop({
+        waypoints: snapshot.waypoints,
+        mode: snapshot.mode,
+        profile: snapshot.routingProfile,
+        routing,
+        failedFromIndices: failedLegs.map((leg) => leg.fromIndex),
+        onProgress: (tried, budget) => setSearching({ tried, budget }),
+      });
+
+      if (!result.ok) return { error: result.error };
+      moveWaypoint(result.value.waypointIndex, result.value.to);
+      return { fix: result.value };
+    } finally {
+      setSearching(undefined);
+    }
+  }, [snapshot.waypoints, snapshot.mode, snapshot.routingProfile, routing, failedLegs, moveWaypoint]);
+
   return {
     ...snapshot,
     legs,
@@ -387,49 +471,28 @@ export const useTrackBuilder = (options: UseTrackBuilderOptions) => {
     complete,
     saving,
     saveError,
+    searching,
     canUndo: history.past.length > 0,
     canRedo: history.future.length > 0,
     actions: {
       addWaypoint,
+      insertWaypoint,
       moveWaypoint,
       removeWaypoint,
       setMode,
+      setStartLine,
       setRoutingProfile,
       setName,
       clear,
       undo,
       redo,
       bake,
+      findLegalLoop,
     },
   };
 };
 
-type LegPair = Pick<BuilderLeg, 'fromIndex' | 'toIndex' | 'from' | 'to'>;
-
-const buildLegPairs = (waypoints: readonly LatLng[], mode: TrackMode): LegPair[] => {
-  const pairs: LegPair[] = [];
-  for (let i = 1; i < waypoints.length; i++) {
-    pairs.push({
-      fromIndex: i - 1,
-      toIndex: i,
-      from: waypoints[i - 1] as LatLng,
-      to: waypoints[i] as LatLng,
-    });
-  }
-  // The closing leg is where one-way networks bite: three sides of a block can
-  // route perfectly and the fourth be impossible in that direction.
-  if (mode === 'circuit' && waypoints.length > 2) {
-    pairs.push({
-      fromIndex: waypoints.length - 1,
-      toIndex: 0,
-      from: waypoints[waypoints.length - 1] as LatLng,
-      to: waypoints[0] as LatLng,
-    });
-  }
-  return pairs;
-};
-
-const toStatus = (cached: RouteLeg | RoutingError | undefined): LegStatus => {
+const toStatus =(cached: RouteLeg | RoutingError | undefined): LegStatus => {
   if (cached === undefined) return { state: 'routing' };
   return 'polyline' in cached ? { state: 'ok', leg: cached } : { state: 'failed', error: cached };
 };

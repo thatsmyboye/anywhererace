@@ -16,7 +16,7 @@ import type {
   StoredRaceSummary,
   TrackSummary,
 } from '@anywhererace/store';
-import { RaceSetup, RaceView, TrackBuilder, TrackList } from '@anywhererace/ui';
+import { RaceSetup, RaceView, TrackBuilder, TrackList, UnitToggle, useUnits } from '@anywhererace/ui';
 import { createProviders, describeDegraded } from './providers';
 import type { DegradedState } from './providers';
 import { buildShareUrl, clearShareParam, readSharedRaceFromLocation } from './shareLink';
@@ -50,6 +50,7 @@ type View =
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
 
 export const App = () => {
+  const units = useUnits();
   const [degraded, setDegraded] = useState<DegradedState>({ routing: false, elevation: false, weather: false });
   const providers = useMemo(
     () => createProviders({ maptilerKey: MAPTILER_KEY, onDegradedChange: setDegraded }),
@@ -326,6 +327,7 @@ export const App = () => {
         <TrackBuilder
           routing={providers.routing}
           elevation={providers.elevation}
+          geocoding={providers.geocoding}
           styleUrl={styleUrl}
           attribution={providers.tiles.attribution}
           onSave={saveTrack}
@@ -383,17 +385,20 @@ export const App = () => {
             <header className="rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
               <div className="flex items-baseline justify-between gap-3">
                 <h1 className="text-sm font-semibold text-[#e6ebf2]">{race.track.name}</h1>
-                <button
-                  type="button"
-                  onClick={() => setView({ name: 'setup', track: race.track })}
-                  className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
-                >
-                  {race.shared ? 'Fork' : 'Settings'}
-                </button>
+                <span className="flex items-center gap-2">
+                  <UnitToggle className="self-center" />
+                  <button
+                    type="button"
+                    onClick={() => setView({ name: 'setup', track: race.track })}
+                    className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
+                  >
+                    {race.shared ? 'Fork' : 'Settings'}
+                  </button>
+                </span>
               </div>
               <p className="text-xs text-[#8d9bb0]">
                 {race.shared ? <span className="text-[#3ddc97]">Shared race · </span> : null}
-                {(race.track.lengthMeters / 1000).toFixed(2)}km · {race.config.laps} laps ·{' '}
+                {units.distance(race.track.lengthMeters)} · {race.config.laps} laps ·{' '}
                 {vehicle?.label ?? race.config.vehicleClassId}
               </p>
             </header>

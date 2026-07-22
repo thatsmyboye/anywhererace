@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import { formatDurationS } from '@anywhererace/core';
+import { formatDurationS, formatShortDistanceM } from '@anywhererace/core';
+import type { UnitSystem } from '@anywhererace/core';
 import type { RaceResult, RaceSnapshot, RacerSnapshot } from '@anywhererace/sim';
 import type { RacerView } from '../useRaceClient';
+import { useUnits } from '../units';
 import { PatternSwatch } from './PatternSwatch';
 
 /**
@@ -54,14 +56,14 @@ type Row = {
  */
 const MIN_SPEED_FOR_TIME_GAP_MS = 2;
 
-const formatGap = (gap: Gap): string => {
+const formatGap = (gap: Gap, system: UnitSystem): string => {
   switch (gap.kind) {
     case 'none':
       return '';
     case 'seconds':
       return `+${gap.value.toFixed(2)}`;
     case 'meters':
-      return `+${Math.round(gap.value)}m`;
+      return `+${formatShortDistanceM(gap.value, system)}`;
   }
 };
 
@@ -123,6 +125,7 @@ export const TimingTower = ({
 
 const TowerRow = ({ row }: { row: Row }) => {
   const { racer, state } = row;
+  const { system } = useUnits();
   const retired =
     state.status === 'dnf-crash' ||
     state.status === 'dnf-mechanical' ||
@@ -154,10 +157,12 @@ const TowerRow = ({ row }: { row: Row }) => {
         ) : row.gapToLeader.kind === 'none' ? (
           <span className="text-[#3ddc97]">Leader</span>
         ) : (
-          <span className="text-[#e6ebf2]">{formatGap(row.gapToLeader)}</span>
+          <span className="text-[#e6ebf2]">{formatGap(row.gapToLeader, system)}</span>
         )}
         {row.gapToAhead.kind !== 'none' && row.lapsDown === 0 && !retired ? (
-          <span className="block text-[10px] text-[#8d9bb0]">{formatGap(row.gapToAhead)}</span>
+          <span className="block text-[10px] text-[#8d9bb0]">
+            {formatGap(row.gapToAhead, system)}
+          </span>
         ) : null}
       </span>
     </li>

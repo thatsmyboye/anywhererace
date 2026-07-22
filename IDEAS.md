@@ -95,29 +95,40 @@ Nothing in the sim would need to change; it is purely an editor.
 **A "why did they lose" explainer on the results page.** The event log plus the
 debug toggles make this tractable: re-run the same seed with `incidents: false`
 and diff the finishing order to say "they lost 12 seconds to that spin on lap
-4". This would be cheap and unusually satisfying.
+4". This would be cheap and unusually satisfying, and the track heat map is now
+most of the *where* — what is missing is the *why*.
 
-**Sector-level heat map on the track.** The baker already computes curvature,
-gradient and surface per 5m node; overlaying where each racer gained and lost
-time against the field is mostly a rendering job.
+**A field-spread heat map**, alongside the per-racer one that is built. Same
+segment timing, different reading: colour each stretch by how much the field
+came apart through it, and you have where the race was actually decided rather
+than where one racer lost it. It would sit naturally beside the separation
+points, which predict the same thing from the road alone — and comparing the
+two would say how good that prediction was.
 
 **Ghost replay against a previous race on the same track.** Determinism makes
 this nearly free — two seeds, same track, render both.
 
-**A "find nearest legal loop" helper** for circuit building on one-way networks.
-CLAUDE.md asks for this in the builder. Now that a real router is wired up this
-is finally tractable: Valhalla reports an unroutable leg distinctly from an
-outage, so the builder already knows *which* corner is impossible — the missing
-piece is searching nearby positions for one that closes the loop.
+**A wider legal-loop search.** The helper that ships spirals out to 180m from
+the endpoints of a broken leg and gives up, because every candidate costs a
+request to a free shared router and a sequential search of sixty of them already
+takes the better part of a minute. Valhalla's `sources_to_targets` matrix
+endpoint would answer a whole ring in one request, which would make a much wider
+and finer search affordable — worth doing if the helper turns out to give up
+more often than it succeeds.
 
-**Insert a waypoint into an existing leg.** Right now a waypoint can only be
-appended, so refining the middle of a long route means clearing and starting
-again. Dragging a point off the route line to split a leg is the standard
-gesture and the leg model already supports it.
+**Dragging the route line itself**, rather than the handle at the middle of it.
+Insert handles ship, and they are the discoverable version — you can see where
+a waypoint would go before you commit to it. Grabbing the line anywhere along
+its length is the gesture people know from Google Maps, and it would want the
+line hit-tested under the cursor and the map's own drag suppressed for that
+gesture. Worth doing only if the midpoint handles turn out to feel restrictive
+on long legs.
 
-**Snap the drawn route to a saved track's start line.** Start and finish are
-currently pinned to the first waypoint; letting the user drag the line along the
-route would make circuits far more raceable.
+**A grid, laid out behind the start line.** The line can be placed now, but
+every racer still begins at the same distance and is separated only by their
+lateral offset. Real starting grids are staggered back down the road, which
+would make the first corner mean something — and the line having somewhere
+sensible to be is the prerequisite that was missing.
 
 **Auto-follow camera modes.** The race view deliberately fits the whole track
 and then leaves the camera alone. Two modes were considered and parked: follow
