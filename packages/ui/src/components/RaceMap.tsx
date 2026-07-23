@@ -248,6 +248,13 @@ const addRacerLayers = (map: MapLibreMap, racers: readonly RacerView[]): void =>
         // would make a bunch look like a single car.
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+        // When markers pile up at low zoom, draw the leader on top. Source
+        // order does not decide this for a symbol layer with overlap allowed —
+        // without a sort key MapLibre stacks by viewport-Y, so whichever racer
+        // happens to sit lowest on screen wins, which is usually a backmarker.
+        // A higher sort key draws later (on top); position 1 is the leader, so
+        // negating position puts the leader highest.
+        'symbol-sort-key': ['*', ['get', 'position'], -1],
         // The name fades in past a zoom threshold, per CLAUDE.md.
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular'],
@@ -353,6 +360,8 @@ const buildRacerFeatures = (
   }
 
   // Draw the leaders last so they sit on top of the pack they are lapping.
+  // This governs the fallback circle layer, where source order is draw order;
+  // the icon symbol layer is ordered by its `symbol-sort-key` instead.
   features.sort((a, b) => Number(b.properties.position) - Number(a.properties.position));
   return { features: { type: 'FeatureCollection', features }, settled: t >= 1 };
 };
