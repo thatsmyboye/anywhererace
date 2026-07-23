@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ISOTimestamp, Track, WeatherConditions, WeatherProvider, WeatherSpec } from '@anywhererace/core';
-import { DRY_STILL_CONDITIONS, centroidOf, createRng, kphToMs } from '@anywhererace/core';
+import { DRY_STILL_CONDITIONS, MAX_FIELD_SIZE, MIN_FIELD_SIZE, centroidOf, createRng, kphToMs } from '@anywhererace/core';
 import type { GridOrder, RaceConfig, RacerSpec, VehicleClass } from '@anywhererace/sim';
 import { ARCHETYPES, VEHICLE_CLASSES } from '@anywhererace/sim';
 import { vehiclesForProfile } from '@anywhererace/track';
@@ -36,8 +36,8 @@ export type UseRaceSetupOptions = {
 };
 
 const DEFAULT_FIELD_SIZE = 12;
-const MIN_FIELD = 2;
-const MAX_FIELD = 40;
+const MIN_FIELD = MIN_FIELD_SIZE;
+const MAX_FIELD = MAX_FIELD_SIZE;
 const DEFAULT_LAPS = 5;
 
 /**

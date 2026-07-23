@@ -1,12 +1,14 @@
 import type { RacerAppearance } from '../palette';
+import { markerShapePoints } from '../palette';
 
 /**
- * The racer's identity chip: colour plus ring pattern, matching the map marker.
+ * The racer's identity chip: colour, ring pattern and body shape, matching the
+ * map marker.
  *
- * The pattern is not decoration. It is the second channel that makes a forty
- * racer field readable for a viewer who cannot distinguish two adjacent hues,
- * and it has to appear everywhere the colour does — otherwise the timing tower
- * becomes the one place the field is ambiguous.
+ * The pattern and shape are not decoration. They are the second and third
+ * channels that make a large field readable for a viewer who cannot distinguish
+ * two adjacent hues, and they have to appear everywhere the colour does —
+ * otherwise the timing tower becomes the one place the field is ambiguous.
  */
 export const PatternSwatch = ({
   appearance,
@@ -18,7 +20,10 @@ export const PatternSwatch = ({
   size?: number;
 }) => {
   const stroke = appearance.color;
+  const center = size / 2;
   const radius = size / 2 - 1.5;
+  const points = markerShapePoints(appearance.shape, center, center, radius);
+  const bodyPoints = markerShapePoints(appearance.shape, center, center, radius - 2);
 
   return (
     <svg
@@ -28,42 +33,33 @@ export const PatternSwatch = ({
       className="shrink-0"
       aria-hidden="true"
     >
-      <circle cx={size / 2} cy={size / 2} r={radius - 2} fill={appearance.color} />
+      <ShapeFill points={bodyPoints} center={center} radius={radius - 2} fill={appearance.color} />
       {appearance.pattern === 'double' ? (
         <>
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            fill="none"
+          <ShapeOutline points={points} center={center} radius={radius} stroke={stroke} width={0.9} />
+          <ShapeOutline
+            points={markerShapePoints(appearance.shape, center, center, radius - 1.6)}
+            center={center}
+            radius={radius - 1.6}
             stroke={stroke}
-            strokeWidth={0.9}
-          />
-          <circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius - 1.6}
-            fill="none"
-            stroke={stroke}
-            strokeWidth={0.9}
+            width={0.9}
           />
         </>
       ) : (
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
+        <ShapeOutline
+          points={points}
+          center={center}
+          radius={radius}
           stroke={stroke}
-          strokeWidth={2}
-          strokeLinecap={appearance.pattern === 'dotted' ? 'round' : 'butt'}
-          strokeDasharray={DASH_ARRAY[appearance.pattern]}
+          width={2}
+          linecap={appearance.pattern === 'dotted' ? 'round' : 'butt'}
+          dash={DASH_ARRAY[appearance.pattern]}
         />
       )}
       {label === undefined ? null : (
         <text
-          x={size / 2}
-          y={size / 2}
+          x={center}
+          y={center}
           textAnchor="middle"
           dominantBaseline="central"
           fontSize={size * 0.45}
@@ -74,6 +70,57 @@ export const PatternSwatch = ({
         </text>
       )}
     </svg>
+  );
+};
+
+/** A filled shape body — a polygon when there are points, a circle otherwise. */
+const ShapeFill = ({
+  points,
+  center,
+  radius,
+  fill,
+}: {
+  points: [number, number][] | null;
+  center: number;
+  radius: number;
+  fill: string;
+}) =>
+  points === null ? (
+    <circle cx={center} cy={center} r={radius} fill={fill} />
+  ) : (
+    <polygon points={points.map(([x, y]) => `${x},${y}`).join(' ')} fill={fill} />
+  );
+
+/** A stroked shape outline, carrying the pattern channel as its dash array. */
+const ShapeOutline = ({
+  points,
+  center,
+  radius,
+  stroke,
+  width,
+  linecap,
+  dash,
+}: {
+  points: [number, number][] | null;
+  center: number;
+  radius: number;
+  stroke: string;
+  width: number;
+  linecap?: 'round' | 'butt';
+  dash?: string | undefined;
+}) => {
+  const common = {
+    fill: 'none',
+    stroke,
+    strokeWidth: width,
+    strokeLinecap: linecap,
+    strokeLinejoin: 'round' as const,
+    strokeDasharray: dash,
+  };
+  return points === null ? (
+    <circle cx={center} cy={center} r={radius} {...common} />
+  ) : (
+    <polygon points={points.map(([x, y]) => `${x},${y}`).join(' ')} {...common} />
   );
 };
 

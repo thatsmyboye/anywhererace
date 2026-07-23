@@ -1,5 +1,5 @@
 import type { Rng, Track } from '@anywhererace/core';
-import { clamp01, createRng, err, kphToMs, ok } from '@anywhererace/core';
+import { MAX_FIELD_SIZE, MIN_FIELD_SIZE, clamp01, createRng, err, kphToMs, ok } from '@anywhererace/core';
 import type { Result } from '@anywhererace/core';
 import type { VehicleClass } from './data/vehicles';
 import { getVehicleClass } from './data/vehicles';
@@ -119,8 +119,8 @@ export type RaceSetup = {
   readonly raceRng: Rng;
 };
 
-const MIN_FIELD = 2;
-const MAX_FIELD = 40;
+const MIN_FIELD = MIN_FIELD_SIZE;
+const MAX_FIELD = MAX_FIELD_SIZE;
 /** Below this a "lap" is meaningless and the node profile is degenerate. */
 const MIN_TRACK_LENGTH_M = 50;
 
@@ -204,7 +204,8 @@ export const prepareRace = (input: RaceInput): Result<RaceSetup, SimError> => {
   const raceRng = createRng(config.seed);
   const gridOrder = orderGrid(config, raceRng.fork('grid'));
 
-  const racers = gridOrder.map((spec, slot) => createRuntime(spec, slot, raceRng));
+  const columns = gridColumns(gridOrder.length);
+  const racers = gridOrder.map((spec, slot) => createRuntime(spec, slot, columns, raceRng));
 
   const lapLengthM = track.lengthMeters;
   const raceDistanceM =
@@ -290,7 +291,22 @@ const orderGrid = (config: RaceConfig, rng: Rng): RacerSpec[] => {
  */
 const compareIds = (a: RacerSpec, b: RacerSpec): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-const createRuntime = (spec: RacerSpec, slot: number, raceRng: Rng): RacerRuntime => {
+/**
+ * Grid columns for a field. Two abreast up to `wideGridThreshold` — every field
+ * the goldens cover, so their layouts and results are untouched — and wider
+ * above it, so a large field packs into more columns rather than a longer tail.
+ */
+const gridColumns = (fieldSize: number): number => {
+  if (fieldSize <= TUNING.grid.wideGridThreshold) return TUNING.grid.slotsPerRow;
+  return Math.ceil(fieldSize / TUNING.grid.wideGridTargetRows);
+};
+
+const createRuntime = (
+  spec: RacerSpec,
+  slot: number,
+  columns: number,
+  raceRng: Rng,
+): RacerRuntime => {
   // Forked by racer id, not by grid slot: adding a racer to the field must not
   // shift anybody else's stream.
   const rng = raceRng.fork(`racer:${spec.id}`);
@@ -301,12 +317,11 @@ const createRuntime = (spec: RacerSpec, slot: number, raceRng: Rng): RacerRuntim
         (getArchetype(spec.personality) as Personality)
       : spec.personality;
 
-  const row = Math.floor(slot / TUNING.grid.slotsPerRow);
-  const column = slot % TUNING.grid.slotsPerRow;
+  const row = Math.floor(slot / columns);
+  const column = slot % columns;
   // Pole sits on the line; everyone else is staggered back and to the side.
   const startDistanceM = -(row * TUNING.grid.slotSpacingM);
-  const startLateralM =
-    (column - (TUNING.grid.slotsPerRow - 1) / 2) * TUNING.grid.lateralStaggerM;
+  const startLateralM = (column - (columns - 1) / 2) * TUNING.grid.lateralStaggerM;
 
   return {
     spec,

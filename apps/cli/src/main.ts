@@ -7,6 +7,7 @@ import {
   msToKph,
 } from '@anywhererace/core';
 import type { LatLng, RoutingProfile } from '@anywhererace/core';
+import { MAX_FIELD_SIZE, MIN_FIELD_SIZE } from '@anywhererace/core';
 import {
   ALL_TOGGLES_ON,
   ARCHETYPES,
@@ -41,7 +42,7 @@ anywhererace — headless race runner
 Options:
   --vehicle <id>       vehicle class            (default: road-cyclist)
   --laps <n>           laps, circuits only      (default: 3)
-  --field <n>          number of racers, 2-40   (default: 10)
+  --field <n>          number of racers, ${MIN_FIELD_SIZE}-${MAX_FIELD_SIZE}  (default: 10)
   --seed <string>      race seed                (default: cli)
   --size <meters>      rough track size         (default: 1200)
   --profile <id>       motor|bicycle|pedestrian (default: motor)

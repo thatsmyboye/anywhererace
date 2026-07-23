@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { createRng } from '@anywhererace/core';
+import { MAX_FIELD_SIZE, MIN_FIELD_SIZE, createRng } from '@anywhererace/core';
 import type {
   Championship,
   ChampionshipRacer,
@@ -33,8 +33,8 @@ export type ChampionshipSetupProps = {
 type PointsPreset = 'f1' | 'linear' | 'custom';
 
 const DEFAULT_FIELD_SIZE = 12;
-const MIN_FIELD = 2;
-const MAX_FIELD = 40;
+const MIN_FIELD = MIN_FIELD_SIZE;
+const MAX_FIELD = MAX_FIELD_SIZE;
 
 export const ChampionshipSetup = ({ onCreate, onCancel }: ChampionshipSetupProps) => {
   const [name, setName] = useState('');

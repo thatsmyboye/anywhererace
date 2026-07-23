@@ -19,10 +19,37 @@ export type MarkerPattern = 'solid' | 'dashed' | 'dotted' | 'double';
 
 export const MARKER_PATTERNS: readonly MarkerPattern[] = ['solid', 'dashed', 'dotted', 'double'];
 
+/**
+ * The third channel. Rendered as the marker's body outline.
+ *
+ * Colour plus one pattern channel holds up to about forty racers; past that the
+ * hue wheel is sliced too finely for the four patterns to keep every similar
+ * pair apart. Shape is a genuinely orthogonal channel — legible at marker size
+ * and unaffected by colour vision deficiency — and it is what makes a
+ * hundred-racer field readable. It is deliberately *not* the vehicle silhouette:
+ * a v1 race runs a single vehicle class, so a silhouette is identical for every
+ * racer and distinguishes nobody.
+ *
+ * Five shapes, coprime with the four patterns, so a given (pattern, shape) pair
+ * recurs only every twenty steps around the hue wheel — 72 degrees at a
+ * hundred racers, a gap no one confuses for a colour clash.
+ */
+export type MarkerShape = 'circle' | 'triangle' | 'square' | 'diamond' | 'pentagon';
+
+export const MARKER_SHAPES: readonly MarkerShape[] = [
+  'circle',
+  'triangle',
+  'square',
+  'diamond',
+  'pentagon',
+];
+
 export type RacerAppearance = {
   /** `#rrggbb`. */
   color: string;
   pattern: MarkerPattern;
+  /** The body outline. See `MarkerShape`. */
+  shape: MarkerShape;
   /** Position in the hue ramp, 0-based. Exposed for tests and debugging. */
   hueIndex: number;
   /** A darker shade of the same hue, for text on top of the colour. */
@@ -56,8 +83,8 @@ const RAMP = {
  *   likely adjacent on the road at the start — land on opposite sides of the
  *   wheel instead of nine degrees apart.
  *
- * The pattern is derived from the *hue* index, never the racer index, which is
- * what guarantees that neighbouring hues always differ in pattern.
+ * The pattern and shape are derived from the *hue* index, never the racer
+ * index, which is what guarantees that neighbouring hues always differ in both.
  */
 export const buildPalette = (count: number): RacerAppearance[] => {
   if (count <= 0) return [];
@@ -70,10 +97,45 @@ export const buildPalette = (count: number): RacerAppearance[] => {
     return {
       color,
       pattern: MARKER_PATTERNS[hueIndex % MARKER_PATTERNS.length] as MarkerPattern,
+      shape: MARKER_SHAPES[hueIndex % MARKER_SHAPES.length] as MarkerShape,
       hueIndex,
       contrastText: oklchToHex(0.2, RAMP.chroma * 0.6, hue),
     };
   });
+};
+
+/**
+ * The vertices of a marker shape, on a circle of the given radius, as `[x, y]`
+ * pairs ready for a canvas or SVG path. `circle` has no vertices and returns
+ * `null` — its renderers draw an arc instead.
+ *
+ * Lives here, next to the shape assignment and free of any canvas or DOM type,
+ * so the map marker (canvas) and the timing-tower chip (SVG) trace an identical
+ * outline from one source. Regular polygons with a per-shape start angle:
+ * triangle, diamond and pentagon sit point-up; square sits flat.
+ */
+export const markerShapePoints = (
+  shape: MarkerShape,
+  cx: number,
+  cy: number,
+  radius: number,
+): [number, number][] | null => {
+  const geometry = SHAPE_GEOMETRY[shape];
+  if (geometry === undefined) return null;
+  const startRad = (geometry.startDeg * Math.PI) / 180;
+  return Array.from({ length: geometry.sides }, (_, i) => {
+    const angle = startRad + (2 * Math.PI * i) / geometry.sides;
+    return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+  });
+};
+
+/** Sides and starting angle per shape; `circle` is absent and special-cased. */
+const SHAPE_GEOMETRY: Partial<Record<MarkerShape, { sides: number; startDeg: number }>> = {
+  triangle: { sides: 3, startDeg: -90 },
+  // Vertices at the diagonals, which puts flat sides on the top and bottom.
+  square: { sides: 4, startDeg: -45 },
+  diamond: { sides: 4, startDeg: -90 },
+  pentagon: { sides: 5, startDeg: -90 },
 };
 
 /**

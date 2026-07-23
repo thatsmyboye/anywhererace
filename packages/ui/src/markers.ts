@@ -1,4 +1,5 @@
-import type { MarkerPattern, RacerAppearance } from './palette';
+import type { MarkerPattern, MarkerShape, RacerAppearance } from './palette';
+import { markerShapePoints } from './palette';
 
 /**
  * Racer markers, drawn once to a canvas and handed to MapLibre as images.
@@ -86,6 +87,7 @@ type Canvas2D = Pick<
   | 'clearRect'
   | 'beginPath'
   | 'arc'
+  | 'closePath'
   | 'fill'
   | 'stroke'
   | 'moveTo'
@@ -122,13 +124,11 @@ const drawMarker = (
 
   // Dark halo first: without it, a marker over a dark basemap has no edge and
   // two overlapping racers merge into one blob.
-  context.beginPath();
-  context.arc(center, center, ringRadius + RING_WIDTH * scale * 0.5, 0, Math.PI * 2);
+  traceShape(context, appearance.shape, center, ringRadius + RING_WIDTH * scale * 0.5);
   context.fillStyle = 'rgba(5, 8, 13, 0.75)';
   context.fill();
 
-  context.beginPath();
-  context.arc(center, center, bodyRadius, 0, Math.PI * 2);
+  traceShape(context, appearance.shape, center, bodyRadius);
   context.fillStyle = appearance.color;
   context.fill();
 
@@ -161,7 +161,8 @@ const drawMarker = (
 /**
  * The second visual channel. Colour alone is not enough at twenty-plus racers,
  * and the palette guarantees that two racers with similar hues never share a
- * ring pattern.
+ * ring pattern. The ring traces the same outline as the body, so on a triangle
+ * or a pentagon the pattern rides the shape rather than a mismatched circle.
  */
 const drawRing = (
   context: Canvas2D,
@@ -178,18 +179,37 @@ const drawRing = (
     // Two thin concentric rings rather than one thick one.
     context.lineWidth = (RING_WIDTH / 2.6) * scale;
     for (const offset of [-RING_WIDTH * 0.42 * scale, RING_WIDTH * 0.42 * scale]) {
-      context.beginPath();
-      context.arc(center, center, radius + offset, 0, Math.PI * 2);
+      traceShape(context, appearance.shape, center, radius + offset);
       context.stroke();
     }
     return;
   }
 
   context.setLineDash((DASH_PATTERNS[appearance.pattern] ?? []).map((n) => n * scale));
-  context.beginPath();
-  context.arc(center, center, radius, 0, Math.PI * 2);
+  traceShape(context, appearance.shape, center, radius);
   context.stroke();
   context.setLineDash([]);
+};
+
+/**
+ * Lay down the path for a marker shape, centred at `center` on a circle of
+ * `radius`. A circle is an arc; every other shape is the polygon whose vertices
+ * `markerShapePoints` computes, so the map and the timing tower agree.
+ */
+const traceShape = (
+  context: Canvas2D,
+  shape: MarkerShape,
+  center: number,
+  radius: number,
+): void => {
+  context.beginPath();
+  const points = markerShapePoints(shape, center, center, radius);
+  if (points === null) {
+    context.arc(center, center, radius, 0, Math.PI * 2);
+    return;
+  }
+  points.forEach(([x, y], i) => (i === 0 ? context.moveTo(x, y) : context.lineTo(x, y)));
+  context.closePath();
 };
 
 /**

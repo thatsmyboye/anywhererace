@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Track, WeatherProvider } from '@anywhererace/core';
-import { formatDurationS } from '@anywhererace/core';
+import { MAX_FIELD_SIZE, MIN_FIELD_SIZE, formatDurationS } from '@anywhererace/core';
 import type { GridOrder, RaceConfig } from '@anywhererace/sim';
 import { getVehicleClass } from '@anywhererace/sim';
 import type { RosterPresetSummary } from '@anywhererace/store';
@@ -132,8 +132,8 @@ export const RaceSetup = ({
             <span className={labelClass}>Field</span>
             <input
               type="number"
-              min={2}
-              max={40}
+              min={MIN_FIELD_SIZE}
+              max={MAX_FIELD_SIZE}
               value={setup.fieldSize}
               onChange={(event) => actions.setFieldSize(Number(event.target.value))}
               className={inputClass}
