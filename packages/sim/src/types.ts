@@ -28,7 +28,7 @@ export type RaceConfig = {
   vehicleClassId: VehicleClassId;
   /** Always baked; never re-fetched at replay time. */
   weather: WeatherSpec;
-  /** 2-40. Must equal `racers.length`. */
+  /** Bounded by `MIN_FIELD_SIZE`..`MAX_FIELD_SIZE`. Must equal `racers.length`. */
   fieldSize: number;
   racers: RacerSpec[];
   seed: string;

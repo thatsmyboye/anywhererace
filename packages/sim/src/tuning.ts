@@ -833,8 +833,26 @@ export const TUNING = {
     /** Lateral stagger between adjacent grid slots, in meters. */
     lateralStaggerM: 1.5,
 
-    /** How many slots per row before the row offset resets. */
+    /** How many slots per row, for fields up to `wideGridThreshold`. */
     slotsPerRow: 2,
+
+    /**
+     * Above this field size the grid widens instead of stretching further back.
+     * A two-wide grid is 8m per row, so a hundred racers two abreast would begin
+     * 400m down the road from pole — nearly half a lap of a short circuit, gone
+     * before the flag. Fields at or below this keep the classic two-wide grid,
+     * which is every field the determinism goldens cover, so their results do
+     * not move.
+     */
+    wideGridThreshold: 40,
+
+    /**
+     * The row count a widened grid aims not to exceed; columns grow to hold the
+     * field within it. Set to the row count of a full classic grid
+     * (`wideGridThreshold / slotsPerRow`) so the widening is continuous at the
+     * threshold and grid depth never exceeds today's maximum.
+     */
+    wideGridTargetRows: 20,
   },
 
   race: {

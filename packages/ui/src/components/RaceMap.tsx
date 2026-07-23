@@ -29,6 +29,29 @@ const RACER_SOURCE = 'race-racers';
 const START_SOURCE = 'race-start-line';
 const HEAT_SOURCE = 'race-heat';
 
+/**
+ * Keep-leader-in-view camera.
+ *
+ * The view still fits the whole track on load and otherwise leaves the camera
+ * alone — until the leader would slip off the edge. The map fitting the route
+ * means the leader is always visible while zoomed out; the moment the user zooms
+ * in, the front of the race can leave the frame, and this brings it back.
+ *
+ * It is a dead zone, not a follow: the camera only nudges when the leader
+ * crosses a margin near the edge, moving just enough to sit them back on it, and
+ * never changes zoom — a hard follow that recentred every frame is the seasick
+ * version parked in IDEAS.md. Any user gesture suspends it briefly so a
+ * deliberate pan is not fought.
+ */
+const FOLLOW = {
+  /** Fraction of each viewport edge kept clear before the camera nudges. */
+  marginFraction: 0.18,
+  /** How long the camera yields after a user gesture before resuming, ms. */
+  resumeAfterUserMs: 4000,
+  /** Duration of one corrective glide, ms. Long enough not to feel like a jump. */
+  glideMs: 600,
+} as const;
+
 export type RaceMapProps = {
   track: Track;
   racers: readonly RacerView[];
@@ -55,6 +78,10 @@ export const RaceMap = ({
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const racersRef = useRef(racers);
   racersRef.current = racers;
+  // When the user last panned or zoomed, so the camera can yield to them. A ref
+  // rather than state: it is read inside the render loop and must never trigger
+  // a re-render.
+  const lastUserGestureRef = useRef(0);
 
   // --- map lifecycle -------------------------------------------------------
   useEffect(() => {
@@ -75,6 +102,14 @@ export const RaceMap = ({
     map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: attribution }));
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     mapRef.current = map;
+
+    // Only a real gesture carries an `originalEvent`; the camera's own glides do
+    // not, so following never mistakes its own movement for the user's.
+    const noteUserGesture = (event: { originalEvent?: unknown }): void => {
+      if (event.originalEvent !== undefined) lastUserGestureRef.current = performance.now();
+    };
+    map.on('dragstart', noteUserGesture);
+    map.on('zoomstart', noteUserGesture);
 
     map.on('load', () => {
       addTrackLayers(map, track);
@@ -134,6 +169,7 @@ export const RaceMap = ({
 
       const { features, settled } = buildRacerFeatures(track, racersRef.current, buffer);
       source.setData(features);
+      keepLeaderInView(map, features, lastUserGestureRef.current);
       if (settled) settledForTick = buffer.current.tick;
     };
 
@@ -288,6 +324,53 @@ const addRacerLayers = (map: MapLibreMap, racers: readonly RacerView[]): void =>
       },
     });
   }
+};
+
+/**
+ * Nudge the camera so the race leader stays inside the dead zone. Does nothing
+ * while the user is in control, while a glide is already running, or while the
+ * leader is comfortably framed — which is the whole time the track fits the
+ * view. See `FOLLOW`.
+ */
+const keepLeaderInView = (
+  map: MapLibreMap,
+  features: RacerFeatureCollection,
+  lastUserGestureMs: number,
+): void => {
+  if (performance.now() - lastUserGestureMs < FOLLOW.resumeAfterUserMs) return;
+  // Don't stack glides: a corrective ease is still "moving", so wait it out. By
+  // the time it ends the leader has a fresh position to correct against.
+  if (map.isMoving()) return;
+
+  let leader: RacerFeatureCollection['features'][number] | undefined;
+  for (const feature of features.features) {
+    if (leader === undefined || Number(feature.properties.position) < Number(leader.properties.position)) {
+      leader = feature;
+    }
+  }
+  if (leader === undefined) return;
+
+  const container = map.getContainer();
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  if (width === 0 || height === 0) return;
+
+  const point = map.project(leader.geometry.coordinates);
+  const marginX = width * FOLLOW.marginFraction;
+  const marginY = height * FOLLOW.marginFraction;
+  const clampedX = Math.min(Math.max(point.x, marginX), width - marginX);
+  const clampedY = Math.min(Math.max(point.y, marginY), height - marginY);
+  if (clampedX === point.x && clampedY === point.y) return;
+
+  // Move the centre by exactly the leader's overshoot: shifting the geographic
+  // point currently under this screen position to the middle lands the leader
+  // back on the margin, and nowhere further. Computed through unproject rather
+  // than a pixel pan so the direction is unambiguous.
+  const center = map.unproject([
+    width / 2 + (point.x - clampedX),
+    height / 2 + (point.y - clampedY),
+  ]);
+  map.easeTo({ center, duration: FOLLOW.glideMs });
 };
 
 type RacerFeatureCollection = {

@@ -124,6 +124,31 @@ missing concept as above.
 
 ---
 
+## Long and multi-day races
+
+**A race longer than six sim hours is a stage race, not one long race.** The sim
+holds a hard `maxTicks` cap at six hours (`TUNING.race.maxTicks`) — a safety valve
+so a misconfigured field (e-scooters up a mountain) terminates rather than hanging
+the worker, not a limit on how long a race is *allowed* to be. Rather than lift it
+and let a single event run all day, a multi-day race is a **championship**: a
+sequence of legs over a fixed field, each its own race under the cap, each baking
+its own weather. The domain already exists (`packages/championship`).
+
+This also answers "multi-day with mechanical repairs" for free, and it is the
+statelessness that does it. Racers carry nothing between races — a `dnf-mechanical`
+in one leg has no effect on the next, where the racer starts whole. An overnight
+repair is not a feature to build; it is what a new leg already is. Building repairs
+*inside* one race would instead mean un-retiring a DNF, which contradicts
+DNF-is-terminal and overlaps the out-of-scope pit-stop item.
+
+What a stage race still lacks is carrying a *result* forward — a rider who abandoned
+one stage nursing a mechanical should perhaps start the next down on GC, not level.
+That is the same "no result writes back into a racer" line the whole design holds,
+and lifting it for stage races is a real decision, not an oversight. The
+reverse-standings grid noted above is the nearest existing hook.
+
+---
+
 ## Smaller ideas noticed while building
 
 **Custom personalities in the UI.** Traits are already a numeric vector with
@@ -168,13 +193,15 @@ lateral offset. Real starting grids are staggered back down the road, which
 would make the first corner mean something — and the line having somewhere
 sensible to be is the prerequisite that was missing.
 
-**Auto-follow camera modes.** The race view deliberately fits the whole track
-and then leaves the camera alone. Two modes were considered and parked: follow
-the leader (dramatic, but you lose the race behind, which is usually where the
-action is) and follow the closest battle (genuinely exciting, but jumps around
-and would need tuning not to feel seasick). The frame buffer and interpolation
-already give a smooth position for any racer, so either is mostly a camera
-easing problem.
+**Auto-follow camera modes.** A gentle keep-leader-in-view nudge is now built
+(`keepLeaderInView` in `RaceMap.tsx`): the view still fits the whole track and
+leaves the camera alone until the leader crosses a margin near the edge, then
+glides just enough to sit them back on it, never changing zoom. Two fuller modes
+were considered and are still parked: a hard follow-the-leader (dramatic, but you
+lose the race behind, which is usually where the action is) and follow-the-closest-battle
+(genuinely exciting, but jumps around and would need tuning not to feel seasick).
+The frame buffer and interpolation already give a smooth position for any racer,
+so either is mostly a camera easing problem.
 
 **Vehicle silhouettes on the map.** Markers are currently colour + ring pattern
 + number. Rotating a per-category SVG to the node bearing would instantly

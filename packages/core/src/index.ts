@@ -5,6 +5,7 @@ export * from './result';
 export * from './rng';
 export * from './units';
 export * from './geo';
+export * from './limits';
 
 export * from './types/track';
 export * from './types/vehicle';
