@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Track } from '@anywhererace/core';
-import { hasBasemapKey } from '@anywhererace/core';
+import type { LatLng, Track, WeatherSpec } from '@anywhererace/core';
+import { DRY_STILL_CONDITIONS, centroidOf, hasBasemapKey, kphToMs } from '@anywhererace/core';
 import type { RaceConfig } from '@anywhererace/sim';
 import { getVehicleClass, isRetirement } from '@anywhererace/sim';
-import type { RaceResult } from '@anywhererace/sim';
+import type { RaceResult, VehicleClass } from '@anywhererace/sim';
+import type { Championship } from '@anywhererace/championship';
+import { configForLeg, legResultFromRaceResult } from '@anywhererace/championship';
 import {
   SHARE_SCHEMA_VERSION,
   createTrackStore,
@@ -11,12 +13,23 @@ import {
   isPayloadUrlSafe,
 } from '@anywhererace/store';
 import type {
+  ChampionshipSummary,
   RosterPresetSummary,
   SharedRace,
   StoredRaceSummary,
   TrackSummary,
 } from '@anywhererace/store';
-import { RaceSetup, RaceView, TrackBuilder, TrackList, UnitToggle, useUnits } from '@anywhererace/ui';
+import {
+  ChampionshipSetup,
+  ChampionshipView,
+  RaceSetup,
+  RaceView,
+  TrackBuilder,
+  TrackList,
+  UnitToggle,
+  useUnits,
+} from '@anywhererace/ui';
+import type { AddLegInput } from '@anywhererace/ui';
 import { createProviders, describeDegraded } from './providers';
 import type { DegradedState } from './providers';
 import { buildShareUrl, clearShareParam, readSharedRaceFromLocation } from './shareLink';
@@ -34,6 +47,8 @@ type View =
   | { name: 'list' }
   | { name: 'builder' }
   | { name: 'setup'; track: Track }
+  | { name: 'championshipSetup' }
+  | { name: 'championship'; championship: Championship }
   | {
       name: 'race';
       track: Track;
@@ -45,6 +60,11 @@ type View =
       savedAs?: { resultHash: string; simVersion: string };
       /** True when this race arrived by link — a read-only copy to watch or fork. */
       shared?: boolean;
+      /**
+       * Set when this race is a championship leg, so a finish can be recorded
+       * back into the championship's standings and return there afterwards.
+       */
+      leg?: { championship: Championship; legIndex: number };
     };
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
@@ -86,15 +106,22 @@ export const App = () => {
   const [tracks, setTracks] = useState<TrackSummary[]>([]);
   const [presets, setPresets] = useState<RosterPresetSummary[]>([]);
   const [races, setRaces] = useState<StoredRaceSummary[]>([]);
+  const [championships, setChampionships] = useState<ChampionshipSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [storeError, setStoreError] = useState<string | undefined>(undefined);
+  // Set while off building a new track for a championship, so a save returns to
+  // that championship rather than the list.
+  const [returnToChampionshipId, setReturnToChampionshipId] = useState<string | undefined>(undefined);
+  // True while a leg is being added — baking its weather is a network round-trip.
+  const [addingLeg, setAddingLeg] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const [result, presetResult, raceResult] = await Promise.all([
+    const [result, presetResult, raceResult, championshipResult] = await Promise.all([
       store.list(),
       store.listRosterPresets(),
       store.listRaces(),
+      store.listChampionships(),
     ]);
     if (result.ok) {
       setTracks(result.value);
@@ -104,6 +131,7 @@ export const App = () => {
     }
     if (presetResult.ok) setPresets(presetResult.value);
     if (raceResult.ok) setRaces(raceResult.value);
+    if (championshipResult.ok) setChampionships(championshipResult.value);
     setLoading(false);
   }, [store]);
 
@@ -122,6 +150,167 @@ export const App = () => {
     },
     [store],
   );
+
+  // --- championships -------------------------------------------------------
+
+  const openChampionship = useCallback(
+    async (id: string) => {
+      const result = await store.getChampionship(id);
+      if (!result.ok) {
+        setStoreError(result.error.message);
+        return;
+      }
+      setView({ name: 'championship', championship: result.value });
+    },
+    [store],
+  );
+
+  const createChampionship = useCallback(
+    async (championship: Championship) => {
+      const saved = await store.saveChampionship({ championship });
+      if (!saved.ok) {
+        setStoreError(saved.error.message);
+        return;
+      }
+      await refresh();
+      setView({ name: 'championship', championship: saved.value });
+    },
+    [store, refresh],
+  );
+
+  const deleteChampionship = useCallback(
+    async (id: string) => {
+      await store.removeChampionship(id);
+      await refresh();
+    },
+    [store, refresh],
+  );
+
+  /**
+   * Persist a mutated championship and keep the open view in step with it.
+   *
+   * Every leg change — added, removed, reordered, raced — routes through here,
+   * so the standings on screen and the standings on disk are never allowed to
+   * diverge.
+   */
+  const persistChampionship = useCallback(
+    async (championship: Championship): Promise<Championship | undefined> => {
+      const saved = await store.saveChampionship({ championship });
+      if (!saved.ok) {
+        setStoreError(saved.error.message);
+        return undefined;
+      }
+      await refresh();
+      setView((current) =>
+        current.name === 'championship' && current.championship.id === saved.value.id
+          ? { name: 'championship', championship: saved.value }
+          : current,
+      );
+      return saved.value;
+    },
+    [store, refresh],
+  );
+
+  /**
+   * Add a leg to a championship: load the full track, bake its weather now, and
+   * append it. Weather is baked at add time and never re-fetched, exactly as a
+   * standalone race bakes it, so the championship replays identically later.
+   */
+  const addLeg = useCallback(
+    async (championship: Championship, input: AddLegInput) => {
+      setAddingLeg(true);
+      const trackResult = await store.get(input.trackId);
+      if (!trackResult.ok) {
+        setStoreError(trackResult.error.message);
+        setAddingLeg(false);
+        return;
+      }
+      const track = trackResult.value.track;
+      const vehicle = getVehicleClass(input.vehicleClassId);
+      const weather = await bakeLegWeather(track, vehicle, input.laps, providers.weather);
+
+      const leg = {
+        id: `leg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        trackId: track.id,
+        trackName: track.name,
+        trackMode: track.mode,
+        startPoint: endpointOf(track, 'start'),
+        finishPoint: endpointOf(track, 'finish'),
+        vehicleClassId: input.vehicleClassId,
+        laps: input.laps,
+        weather,
+        seed: Math.random().toString(36).slice(2, 10),
+      };
+      await persistChampionship({ ...championship, legs: [...championship.legs, leg] });
+      setAddingLeg(false);
+    },
+    [store, providers, persistChampionship],
+  );
+
+  const removeLeg = useCallback(
+    (championship: Championship, legId: string) =>
+      void persistChampionship({
+        ...championship,
+        legs: championship.legs.filter((leg) => leg.id !== legId),
+      }),
+    [persistChampionship],
+  );
+
+  const reorderLeg = useCallback(
+    (championship: Championship, legId: string, direction: -1 | 1) => {
+      const index = championship.legs.findIndex((leg) => leg.id === legId);
+      const target = index + direction;
+      if (index === -1 || target < 0 || target >= championship.legs.length) return;
+      const legs = [...championship.legs];
+      const moved = legs[index];
+      const swap = legs[target];
+      if (moved === undefined || swap === undefined) return;
+      legs[index] = swap;
+      legs[target] = moved;
+      void persistChampionship({ ...championship, legs });
+    },
+    [persistChampionship],
+  );
+
+  /** Run one leg: reuse the race view, tagged so its finish is recorded back. */
+  const raceLeg = useCallback(
+    async (championship: Championship, legIndex: number) => {
+      const leg = championship.legs[legIndex];
+      if (leg === undefined) return;
+      const trackResult = await store.get(leg.trackId);
+      if (!trackResult.ok) {
+        setStoreError(
+          'The track this leg was built on has been deleted, so it cannot be raced.',
+        );
+        return;
+      }
+      setView({
+        name: 'race',
+        track: trackResult.value.track,
+        config: configForLeg(championship, leg),
+        leg: { championship, legIndex },
+      });
+    },
+    [store],
+  );
+
+  /** Fold a finished leg's result into the championship and return to it. */
+  const recordLegResult = useCallback(
+    async (championship: Championship, legIndex: number, result: RaceResult): Promise<boolean> => {
+      const legResult = legResultFromRaceResult(result, new Date().toISOString());
+      const legs = championship.legs.map((leg, index) =>
+        index === legIndex ? { ...leg, result: legResult } : leg,
+      );
+      const saved = await persistChampionship({ ...championship, legs });
+      return saved !== undefined;
+    },
+    [persistChampionship],
+  );
+
+  const buildTrackForChampionship = useCallback((championshipId: string) => {
+    setReturnToChampionshipId(championshipId);
+    setView({ name: 'builder' });
+  }, []);
 
   const saveRosterPreset = useCallback(
     async (name: string, racers: { name: string; color: string; personality: string; skill: number }[]) => {
@@ -169,9 +358,17 @@ export const App = () => {
         return;
       }
       await refresh();
+      // If this track was built for a championship, go back to it rather than
+      // to the list — the new track is now available to add as a leg.
+      if (returnToChampionshipId !== undefined) {
+        const target = returnToChampionshipId;
+        setReturnToChampionshipId(undefined);
+        await openChampionship(target);
+        return;
+      }
       setView({ name: 'list' });
     },
-    [store, providers, refresh],
+    [store, providers, refresh, returnToChampionshipId, openChampionship],
   );
 
   /**
@@ -331,7 +528,12 @@ export const App = () => {
           styleUrl={styleUrl}
           attribution={providers.tiles.attribution}
           onSave={saveTrack}
-          onCancel={() => setView({ name: 'list' })}
+          onCancel={() => {
+            const target = returnToChampionshipId;
+            setReturnToChampionshipId(undefined);
+            if (target !== undefined) void openChampionship(target);
+            else setView({ name: 'list' });
+          }}
           degradedNotice={describeDegraded(degraded, hasBasemapKey(MAPTILER_KEY))}
         />
       </div>
@@ -355,6 +557,41 @@ export const App = () => {
     );
   }
 
+  if (view.name === 'championshipSetup') {
+    return (
+      <div className="h-dvh w-screen overflow-hidden bg-[#0b0e13]">
+        <ChampionshipSetup
+          onCreate={(championship) => void createChampionship(championship)}
+          onCancel={() => setView({ name: 'list' })}
+        />
+      </div>
+    );
+  }
+
+  if (view.name === 'championship') {
+    const champ = view.championship;
+    return (
+      <div className="h-dvh w-screen overflow-hidden bg-[#0b0e13]">
+        <ChampionshipView
+          championship={champ}
+          tracks={tracks}
+          busy={addingLeg}
+          error={storeError}
+          onAddLeg={(input) => void addLeg(champ, input)}
+          onRemoveLeg={(legId) => removeLeg(champ, legId)}
+          onReorderLeg={(legId, direction) => reorderLeg(champ, legId, direction)}
+          onRaceLeg={(legIndex) => void raceLeg(champ, legIndex)}
+          onBuildTrack={() => buildTrackForChampionship(champ.id)}
+          onBack={() => setView({ name: 'list' })}
+          onDelete={() => {
+            void deleteChampionship(champ.id);
+            setView({ name: 'list' });
+          }}
+        />
+      </div>
+    );
+  }
+
   if (view.name === 'race') {
     const race = view;
     const vehicle = getVehicleClass(race.config.vehicleClassId);
@@ -368,19 +605,34 @@ export const App = () => {
           attribution={providers.tiles.attribution}
           trackName={race.track.name}
           savedAs={race.savedAs}
-          resultActions={(result) => (
-            <div className="flex items-center gap-2">
-              <ShareRaceButton buildUrl={() => buildRaceLink(race.track, race.config, result)} />
-              {race.shared ? (
-                <SaveRaceButton
-                  label="Save to my races"
-                  onSave={() => saveSharedRace(race.track, race.config, result)}
+          resultActions={(result) =>
+            race.leg !== undefined ? (
+              <div className="flex items-center gap-2">
+                <ShareRaceButton buildUrl={() => buildRaceLink(race.track, race.config, result)} />
+                <RecordLegButton
+                  alreadyRaced={race.leg.championship.legs[race.leg.legIndex]?.result !== undefined}
+                  onRecord={async () => {
+                    const leg = race.leg;
+                    if (leg === undefined) return;
+                    const ok = await recordLegResult(leg.championship, leg.legIndex, result);
+                    if (ok) await openChampionship(leg.championship.id);
+                  }}
                 />
-              ) : (
-                <SaveRaceButton onSave={() => saveRace(race.track, race.config, result)} />
-              )}
-            </div>
-          )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <ShareRaceButton buildUrl={() => buildRaceLink(race.track, race.config, result)} />
+                {race.shared ? (
+                  <SaveRaceButton
+                    label="Save to my races"
+                    onSave={() => saveSharedRace(race.track, race.config, result)}
+                  />
+                ) : (
+                  <SaveRaceButton onSave={() => saveRace(race.track, race.config, result)} />
+                )}
+              </div>
+            )
+          }
           header={
             <header className="rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
               <div className="flex items-baseline justify-between gap-3">
@@ -389,15 +641,25 @@ export const App = () => {
                   <UnitToggle className="self-center" />
                   <button
                     type="button"
-                    onClick={() => setView({ name: 'setup', track: race.track })}
+                    onClick={() => {
+                      const leg = race.leg;
+                      if (leg !== undefined) void openChampionship(leg.championship.id);
+                      else setView({ name: 'setup', track: race.track });
+                    }}
                     className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
                   >
-                    {race.shared ? 'Fork' : 'Settings'}
+                    {race.leg !== undefined ? 'Back to championship' : race.shared ? 'Fork' : 'Settings'}
                   </button>
                 </span>
               </div>
               <p className="text-xs text-[#8d9bb0]">
-                {race.shared ? <span className="text-[#3ddc97]">Shared race · </span> : null}
+                {race.leg !== undefined ? (
+                  <span className="text-[#4da3ff]">
+                    {race.leg.championship.name} · leg {race.leg.legIndex + 1} ·{' '}
+                  </span>
+                ) : race.shared ? (
+                  <span className="text-[#3ddc97]">Shared race · </span>
+                ) : null}
                 {units.distance(race.track.lengthMeters)} · {race.config.laps} laps ·{' '}
                 {vehicle?.label ?? race.config.vehicleClassId}
               </p>
@@ -413,6 +675,7 @@ export const App = () => {
       <TrackList
         tracks={tracks}
         races={races}
+        championships={championships}
         loading={loading}
         error={storeError}
         onCreate={() => setView({ name: 'builder' })}
@@ -420,6 +683,9 @@ export const App = () => {
         onDelete={(id) => void deleteTrack(id)}
         onReplay={(id) => void replayRace(id)}
         onDeleteRace={(id) => void deleteRace(id)}
+        onCreateChampionship={() => setView({ name: 'championshipSetup' })}
+        onOpenChampionship={(id) => void openChampionship(id)}
+        onDeleteChampionship={(id) => void deleteChampionship(id)}
       />
     </div>
   );
@@ -450,6 +716,41 @@ const SaveRaceButton = ({
       className="rounded border border-[#2b3543] bg-[#1f2632] px-3 py-1.5 text-sm text-[#e6ebf2] transition-colors hover:bg-[#2b3543] disabled:opacity-60"
     >
       {state === 'saved' ? 'Saved' : state === 'saving' ? 'Saving…' : label}
+    </button>
+  );
+};
+
+/**
+ * Record a championship leg's result into the standings.
+ *
+ * A leg raced for the first time reads "Record result"; re-racing one that was
+ * already scored reads "Update result", because recording overwrites the stored
+ * finish — the seed is fixed, so a re-race is the same race, but a re-race under
+ * a changed sim is exactly how a user brings a stale leg's standings current.
+ */
+const RecordLegButton = ({
+  alreadyRaced,
+  onRecord,
+}: {
+  alreadyRaced: boolean;
+  onRecord: () => Promise<void>;
+}) => {
+  const [state, setState] = useState<'idle' | 'saving'>('idle');
+  return (
+    <button
+      type="button"
+      disabled={state !== 'idle'}
+      onClick={() => {
+        setState('saving');
+        void onRecord().finally(() => setState('idle'));
+      }}
+      className="rounded bg-[#4da3ff] px-3 py-1.5 text-sm font-semibold text-[#0b0e13] transition-colors hover:bg-[#6fb5ff] disabled:opacity-60"
+    >
+      {state === 'saving'
+        ? 'Recording…'
+        : alreadyRaced
+          ? 'Update result & continue'
+          : 'Record result & continue'}
     </button>
   );
 };
@@ -517,6 +818,63 @@ const SharedRaceError = ({ message, onDismiss }: { message: string; onDismiss: (
     </div>
   </div>
 );
+
+/** A track's start or finish point, for a tour's continuity check. */
+const endpointOf = (track: Track, which: 'start' | 'finish'): LatLng => {
+  const points = track.nodes.length > 0 ? track.nodes : track.polyline;
+  const point = which === 'start' ? points[0] : points[points.length - 1];
+  return point === undefined ? { lat: 0, lng: 0 } : { lat: point.lat, lng: point.lng };
+};
+
+/**
+ * How long a fraction of the field's forecast to fetch. Generous by design: the
+ * same crude estimate race setup uses, so a leg's weather covers its whole run.
+ */
+const DURATION_SAFETY_FACTOR = 1.6;
+
+const estimateLegDurationS = (track: Track, laps: number, vehicle: VehicleClass | undefined): number => {
+  if (vehicle === undefined) return 0;
+  const distanceM = track.mode === 'circuit' ? track.lengthMeters * laps : track.lengthMeters;
+  const assumedSpeedMs = kphToMs(vehicle.topSpeedKph) * 0.7;
+  return assumedSpeedMs <= 0 ? 0 : distanceM / assumedSpeedMs;
+};
+
+/**
+ * Bake a leg's weather at add time, and never re-fetch it.
+ *
+ * The live forecast for the track's centroid is fetched once and frozen onto
+ * the leg, exactly as a standalone race bakes it, so the championship replays
+ * identically later. If the forecast is unavailable the leg falls back to a
+ * dry, still day — a legitimate, deterministic `WeatherSpec`, not a lookup —
+ * rather than failing to add.
+ */
+const bakeLegWeather = async (
+  track: Track,
+  vehicle: VehicleClass | undefined,
+  laps: number,
+  weather: ReturnType<typeof createProviders>['weather'],
+): Promise<WeatherSpec> => {
+  const durationS = estimateLegDurationS(track, laps, vehicle);
+  const fallback: WeatherSpec = { kind: 'manual', conditions: DRY_STILL_CONDITIONS };
+  if (durationS <= 0) return fallback;
+
+  const fetchedAt = new Date().toISOString();
+  const at = centroidOf(track.nodes.length > 0 ? track.nodes : track.polyline);
+  const result = await weather.forecast({
+    at,
+    startsAt: fetchedAt,
+    durationS: durationS * DURATION_SAFETY_FACTOR,
+  });
+  if (!result.ok) return fallback;
+  return {
+    kind: 'live',
+    fetchedAt,
+    startsAt: fetchedAt,
+    timeline: result.value,
+    latitude: at.lat,
+    longitude: at.lng,
+  };
+};
 
 /**
  * Vite needs to see `new Worker(new URL(...))` literally in order to bundle the

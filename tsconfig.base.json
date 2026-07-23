@@ -28,6 +28,8 @@
       "@anywhererace/core/*": ["packages/core/src/*"],
       "@anywhererace/sim": ["packages/sim/src/index.ts"],
       "@anywhererace/sim/*": ["packages/sim/src/*"],
+      "@anywhererace/championship": ["packages/championship/src/index.ts"],
+      "@anywhererace/championship/*": ["packages/championship/src/*"],
       "@anywhererace/track": ["packages/track/src/index.ts"],
       "@anywhererace/track/*": ["packages/track/src/*"],
       "@anywhererace/worker": ["packages/worker/src/index.ts"],
