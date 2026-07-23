@@ -1,4 +1,5 @@
 import type { ChampionshipSummary, StoredRaceSummary, TrackSummary } from '@anywhererace/store';
+import { UnitToggle, useUnits } from '../units';
 
 /**
  * Saved tracks.
@@ -40,7 +41,10 @@ export const TrackList = ({
   onCreateChampionship,
   onOpenChampionship,
   onDeleteChampionship,
-}: TrackListProps) => (
+}: TrackListProps) => {
+  const units = useUnits();
+
+  return (
   <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-8 text-[#e6ebf2]">
     <header className="flex items-baseline justify-between">
       <div>
@@ -48,6 +52,7 @@ export const TrackList = ({
         <p className="text-sm text-[#8d9bb0]">Draw a track on a real map, then watch it race.</p>
       </div>
       <div className="flex items-center gap-2">
+        <UnitToggle className="self-center" />
         <button
           type="button"
           onClick={onCreateChampionship}

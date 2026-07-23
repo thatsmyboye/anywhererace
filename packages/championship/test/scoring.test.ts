@@ -261,6 +261,7 @@ describe('legResultFromRaceResult', () => {
       durationS: 3600,
       totalTicks: 72000,
       resultHash: 'abc',
+      segments: { segmentLengthM: 0, segmentCount: 0, perRacer: [] },
       finishers: [
         {
           racerId: 'a',

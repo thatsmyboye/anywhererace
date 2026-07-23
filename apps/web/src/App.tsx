@@ -26,6 +26,8 @@ import {
   RaceView,
   TrackBuilder,
   TrackList,
+  UnitToggle,
+  useUnits,
 } from '@anywhererace/ui';
 import type { AddLegInput } from '@anywhererace/ui';
 import { createProviders, describeDegraded } from './providers';
@@ -635,17 +637,20 @@ export const App = () => {
             <header className="rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
               <div className="flex items-baseline justify-between gap-3">
                 <h1 className="text-sm font-semibold text-[#e6ebf2]">{race.track.name}</h1>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const leg = race.leg;
-                    if (leg !== undefined) void openChampionship(leg.championship.id);
-                    else setView({ name: 'setup', track: race.track });
-                  }}
-                  className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
-                >
-                  {race.leg !== undefined ? 'Back to championship' : race.shared ? 'Fork' : 'Settings'}
-                </button>
+                <span className="flex items-center gap-2">
+                  <UnitToggle className="self-center" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const leg = race.leg;
+                      if (leg !== undefined) void openChampionship(leg.championship.id);
+                      else setView({ name: 'setup', track: race.track });
+                    }}
+                    className="text-xs text-[#8d9bb0] underline-offset-2 hover:text-[#e6ebf2] hover:underline"
+                  >
+                    {race.leg !== undefined ? 'Back to championship' : race.shared ? 'Fork' : 'Settings'}
+                  </button>
+                </span>
               </div>
               <p className="text-xs text-[#8d9bb0]">
                 {race.leg !== undefined ? (
@@ -655,7 +660,7 @@ export const App = () => {
                 ) : race.shared ? (
                   <span className="text-[#3ddc97]">Shared race · </span>
                 ) : null}
-                {(race.track.lengthMeters / 1000).toFixed(2)}km · {race.config.laps} laps ·{' '}
+                {units.distance(race.track.lengthMeters)} · {race.config.laps} laps ·{' '}
                 {vehicle?.label ?? race.config.vehicleClassId}
               </p>
             </header>
