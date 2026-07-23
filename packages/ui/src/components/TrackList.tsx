@@ -1,4 +1,4 @@
-import type { StoredRaceSummary, TrackSummary } from '@anywhererace/store';
+import type { ChampionshipSummary, StoredRaceSummary, TrackSummary } from '@anywhererace/store';
 
 /**
  * Saved tracks.
@@ -13,6 +13,7 @@ import type { StoredRaceSummary, TrackSummary } from '@anywhererace/store';
 export type TrackListProps = {
   tracks: readonly TrackSummary[];
   races: readonly StoredRaceSummary[];
+  championships: readonly ChampionshipSummary[];
   loading: boolean;
   error?: string | undefined;
   onCreate: () => void;
@@ -20,11 +21,15 @@ export type TrackListProps = {
   onDelete: (id: string) => void;
   onReplay: (raceId: string) => void;
   onDeleteRace: (raceId: string) => void;
+  onCreateChampionship: () => void;
+  onOpenChampionship: (id: string) => void;
+  onDeleteChampionship: (id: string) => void;
 };
 
 export const TrackList = ({
   tracks,
   races,
+  championships,
   loading,
   error,
   onCreate,
@@ -32,6 +37,9 @@ export const TrackList = ({
   onDelete,
   onReplay,
   onDeleteRace,
+  onCreateChampionship,
+  onOpenChampionship,
+  onDeleteChampionship,
 }: TrackListProps) => (
   <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-8 text-[#e6ebf2]">
     <header className="flex items-baseline justify-between">
@@ -39,13 +47,22 @@ export const TrackList = ({
         <h1 className="text-xl font-semibold">AnywhereRace</h1>
         <p className="text-sm text-[#8d9bb0]">Draw a track on a real map, then watch it race.</p>
       </div>
-      <button
-        type="button"
-        onClick={onCreate}
-        className="rounded bg-[#4da3ff] px-3 py-2 text-sm font-semibold text-[#0b0e13] transition-colors hover:bg-[#6fb5ff]"
-      >
-        New track
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onCreateChampionship}
+          className="rounded border border-[#2b3543] bg-[#1f2632] px-3 py-2 text-sm font-semibold text-[#e6ebf2] transition-colors hover:bg-[#2b3543]"
+        >
+          New championship
+        </button>
+        <button
+          type="button"
+          onClick={onCreate}
+          className="rounded bg-[#4da3ff] px-3 py-2 text-sm font-semibold text-[#0b0e13] transition-colors hover:bg-[#6fb5ff]"
+        >
+          New track
+        </button>
+      </div>
     </header>
 
     {error === undefined ? null : (
@@ -104,6 +121,56 @@ export const TrackList = ({
           </li>
         ))}
       </ul>
+    )}
+
+    {championships.length === 0 ? null : (
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[11px] font-semibold uppercase tracking-wide text-[#8d9bb0]">
+          Championships
+        </h2>
+        <ul className="flex flex-col gap-2">
+          {championships.map((championship) => (
+            <li
+              key={championship.id}
+              className="flex items-center gap-3 rounded-lg border border-[#2b3543] bg-[#161b24] px-4 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate font-medium">
+                  {championship.name}
+                  {championship.tour ? (
+                    <span className="ml-2 rounded bg-[#4da3ff]/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[#4da3ff]">
+                      Tour
+                    </span>
+                  ) : null}
+                </h3>
+                <p className="text-xs tabular-nums text-[#8d9bb0]">
+                  {championship.completedLegs}/{championship.legCount}{' '}
+                  {championship.legCount === 1 ? 'leg' : 'legs'} · {championship.fieldSize} racers ·{' '}
+                  {scoringWord(championship.scoring)}
+                  {championship.leaderName === undefined
+                    ? ''
+                    : ` · leading: ${championship.leaderName}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenChampionship(championship.id)}
+                className="shrink-0 rounded bg-[#1f2632] px-3 py-1.5 text-sm transition-colors hover:bg-[#2b3543]"
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeleteChampionship(championship.id)}
+                className="shrink-0 rounded px-2 py-1.5 text-sm text-[#8d9bb0] transition-colors hover:bg-[#2b3543] hover:text-[#ff5c5c]"
+                aria-label={`Delete championship ${championship.name}`}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
     )}
 
     {races.length === 0 ? null : (
@@ -190,6 +257,9 @@ const badge = (track: TrackSummary): { label: string; title: string } | undefine
   }
   return undefined;
 };
+
+const scoringWord = (scoring: ChampionshipSummary['scoring']): string =>
+  scoring === 'points' ? 'points' : scoring === 'hybrid' ? 'time + points' : 'time';
 
 /** Short, local, and never a raw ISO string in front of a user. */
 const formatDate = (iso: string): string => {

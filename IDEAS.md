@@ -32,15 +32,53 @@ endurance reservoir, plus a pit-lane geometry concept the track model does not
 have. The endurance framework (`enduranceModel`, drain, fade) is the natural
 hook.
 
-**Championships.** A sequence of races with points. Compatible with stateless
-racers as long as the standings live outside the sim and nothing writes back
-into a racer.
-
 **Day/night cycle.** Would ride on the existing weather timeline —
 `WeatherSpec` already interpolates across a race — plus a visibility term the
 tick already has.
 
 **3D terrain view.** The DEM is already fetched and baked per node.
+
+---
+
+## Left over from the championship change
+
+Championships are built — a sequence of races over a fixed field, scored outside
+the sim. The domain lives in `packages/championship` (types, standings, tour
+continuity), persistence in `packages/store`, and the UI in
+`packages/ui/src/components/championship`. The field is materialised onto the
+championship as a snapshot so its standings cannot shift underneath it, each leg
+bakes its own weather at add time, and nothing is ever written back into a
+racer. Scoring is `time`, `points`, or `hybrid` (time with points breaking a
+tie); the points table is configurable. Five things it turned up and did not do:
+
+**A leg's finishing order is stored, unlike a standalone race.** A saved race
+keeps only its inputs and re-runs; a championship keeps each leg's finishing
+order too, because redrawing a standings table by re-running every leg would be
+slow and pointless. Each leg still carries the `simVersion` it ran under, and a
+stale leg is flagged rather than silently trusted — the same honesty a
+mismatched race hash gets — but the projection is not free, and a future change
+could reconcile the two approaches.
+
+**Tour-style is validated, not stitched.** A tour checks that each leg's finish
+is near the next leg's start and warns when it is not, but legs are added as-is;
+it does not auto-pin a new leg's first waypoint to the previous finish. That
+needs real track-builder integration — the "insert a waypoint" and "snap the
+start line" gestures below are the pieces it would build on.
+
+**One vehicle class per leg, chosen per leg.** A championship can mix classes
+across its legs (a bicycle stage, then a rally stage), but a single leg still
+runs one class for its whole field, because mixed classes in one race is its own
+out-of-scope item above. The field's personalities and skills are class-agnostic
+and carry across, which is what makes this coherent.
+
+**No reverse-championship grid.** Grid order is fixed championship-wide. A
+reverse-standings grid — last leg's leader starts at the back of the next — is
+the obvious way to keep a runaway championship alive, and needs the standings
+this now computes plus a `manual` grid built from them.
+
+**Championship sharing.** A `SharedRace` carries one race; the same treatment
+for a whole championship (inputs, not recordings, with per-leg hashes) would
+share a season. The share codec and the OG card are per-race today.
 
 ---
 

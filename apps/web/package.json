@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anywhererace/championship": "workspace:*",
     "@anywhererace/core": "workspace:*",
     "@anywhererace/sim": "workspace:*",
     "@anywhererace/track": "workspace:*",

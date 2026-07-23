@@ -1,4 +1,6 @@
 import type { Track } from '@anywhererace/core';
+import type { Championship, ScoringMode } from '@anywhererace/championship';
+import { computeStandings } from '@anywhererace/championship';
 import type { RaceConfig, RacerSpec } from '@anywhererace/sim';
 
 /**
@@ -15,7 +17,7 @@ import type { RaceConfig, RacerSpec } from '@anywhererace/sim';
  */
 
 /** Bumped whenever the stored shape changes. Dexie migrates on open. */
-export const STORE_VERSION = 3;
+export const STORE_VERSION = 4;
 
 export type StoredTrack = {
   /** Primary key. Same id the `Track` carries. */
@@ -180,3 +182,56 @@ export const toRaceSummary = (race: StoredRace): StoredRaceSummary => ({
   simVersion: race.simVersion,
   summary: race.summary,
 });
+
+/**
+ * A stored championship.
+ *
+ * The `Championship` document is self-contained and stored whole, exactly like
+ * a track: it is only ever read in full, and normalising its legs or racers
+ * into their own tables would buy nothing but joins. Its own `id` is the
+ * primary key.
+ *
+ * Unlike a `StoredRace`, a championship keeps each completed leg's finishing
+ * order rather than only inputs. That is not a career sneaking back in — it is
+ * the standings ledger, which belongs to the championship, not to any racer —
+ * and it is what lets a standings table be drawn without re-running every leg.
+ * Each leg still carries the `simVersion` it ran under, so a leg raced on a
+ * since-changed sim can be flagged rather than silently trusted.
+ */
+export type StoredChampionship = Championship;
+
+/** What a championship list needs without walking every leg's finishing order. */
+export type ChampionshipSummary = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  scoring: ScoringMode;
+  tour: boolean;
+  fieldSize: number;
+  legCount: number;
+  completedLegs: number;
+  /** The current leader's name, once any leg has been run. */
+  leaderName?: string;
+};
+
+export const toChampionshipSummary = (championship: StoredChampionship): ChampionshipSummary => {
+  const completedLegs = championship.legs.filter((leg) => leg.result !== undefined).length;
+  // Only compute a leader once there is a race to lead: an all-zero table has
+  // no meaningful order beyond the name tiebreak, and calling someone the
+  // leader of a championship nobody has raced yet would be a small lie.
+  const leaderName =
+    completedLegs > 0 ? computeStandings(championship)[0]?.name : undefined;
+  return {
+    id: championship.id,
+    name: championship.name,
+    createdAt: championship.createdAt,
+    updatedAt: championship.updatedAt,
+    scoring: championship.scoring,
+    tour: championship.tour,
+    fieldSize: championship.racers.length,
+    legCount: championship.legs.length,
+    completedLegs,
+    ...(leaderName === undefined ? {} : { leaderName }),
+  };
+};

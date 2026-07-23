@@ -44,6 +44,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@anywhererace/championship':
+        specifier: workspace:*
+        version: link:../../packages/championship
       '@anywhererace/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -94,6 +97,15 @@ importers:
         specifier: ^6.0.7
         version: 6.4.3(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.1)
 
+  packages/championship:
+    dependencies:
+      '@anywhererace/core':
+        specifier: workspace:*
+        version: link:../core
+      '@anywhererace/sim':
+        specifier: workspace:*
+        version: link:../sim
+
   packages/core: {}
 
   packages/sim:
@@ -104,6 +116,9 @@ importers:
 
   packages/store:
     dependencies:
+      '@anywhererace/championship':
+        specifier: workspace:*
+        version: link:../championship
       '@anywhererace/core':
         specifier: workspace:*
         version: link:../core
@@ -132,6 +147,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@anywhererace/championship':
+        specifier: workspace:*
+        version: link:../championship
       '@anywhererace/core':
         specifier: workspace:*
         version: link:../core

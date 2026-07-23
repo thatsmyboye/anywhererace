@@ -14,6 +14,7 @@ export default defineConfig({
     alias: {
       '@anywhererace/core': pkg('core'),
       '@anywhererace/sim': pkg('sim'),
+      '@anywhererace/championship': pkg('championship'),
       '@anywhererace/track': pkg('track'),
       '@anywhererace/worker': pkg('worker'),
       '@anywhererace/store': pkg('store'),
@@ -29,6 +30,14 @@ export default defineConfig({
       {
         extends: true,
         test: { name: 'sim', include: ['packages/sim/test/**/*.test.ts'], environment: 'node' },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'championship',
+          include: ['packages/championship/test/**/*.test.ts'],
+          environment: 'node',
+        },
       },
       {
         extends: true,

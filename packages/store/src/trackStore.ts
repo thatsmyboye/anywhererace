@@ -1,18 +1,27 @@
 import Dexie from 'dexie';
 import type { EntityTable } from 'dexie';
+import type { Championship } from '@anywhererace/championship';
 import type { Track } from '@anywhererace/core';
 import { err, ok } from '@anywhererace/core';
 import type { Result } from '@anywhererace/core';
 import type {
+  ChampionshipSummary,
   RosterPresetSummary,
   RosterRow,
+  StoredChampionship,
   StoredRace,
   StoredRaceSummary,
   StoredRosterPreset,
   StoredTrack,
   TrackSummary,
 } from './schema';
-import { STORE_VERSION, toPresetSummary, toRaceSummary, toSummary } from './schema';
+import {
+  STORE_VERSION,
+  toChampionshipSummary,
+  toPresetSummary,
+  toRaceSummary,
+  toSummary,
+} from './schema';
 
 /**
  * Local-first track storage on IndexedDB.
@@ -60,8 +69,21 @@ export interface TrackStore {
   getRace(id: string): Promise<Result<StoredRace, StoreError>>;
   removeRace(id: string): Promise<Result<void, StoreError>>;
 
+  saveChampionship(
+    input: SaveChampionshipInput,
+  ): Promise<Result<StoredChampionship, StoreError>>;
+  listChampionships(): Promise<Result<ChampionshipSummary[], StoreError>>;
+  getChampionship(id: string): Promise<Result<StoredChampionship, StoreError>>;
+  removeChampionship(id: string): Promise<Result<void, StoreError>>;
+
   close(): void;
 }
+
+export type SaveChampionshipInput = {
+  championship: Championship;
+  /** ISO-8601 timestamp. Injected so tests are not at the mercy of the clock. */
+  now?: string;
+};
 
 export type SaveRosterPresetInput = {
   id: string;
@@ -74,6 +96,7 @@ type Schema = Dexie & {
   tracks: EntityTable<StoredTrack, 'id'>;
   rosterPresets: EntityTable<StoredRosterPreset, 'id'>;
   races: EntityTable<StoredRace, 'id'>;
+  championships: EntityTable<StoredChampionship, 'id'>;
 };
 
 export type TrackStoreOptions = {
@@ -102,6 +125,10 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
     // ordering. Nothing is indexed by racer: there is no per-racer history to
     // query, by design.
     races: 'id, trackId, createdAt',
+    // Standings are held on the championship document, not indexed here — a
+    // championship is only ever read whole, and there is nothing to query
+    // across championships by racer, again by design.
+    championships: 'id, name, updatedAt',
   });
 
   return {
@@ -269,6 +296,55 @@ export const createTrackStore = (options: TrackStoreOptions = {}): TrackStore =>
     async removeRace(id) {
       try {
         await db.races.delete(id);
+        return ok(undefined);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async saveChampionship(input) {
+      const timestamp = input.now ?? new Date().toISOString();
+      try {
+        const existing = await db.championships.get(input.championship.id);
+        const record: StoredChampionship = {
+          ...input.championship,
+          // The store owns these timestamps, exactly as it does for a track:
+          // the first save stamps the creation date, later saves keep it. The
+          // document's own `createdAt` is not a second source of truth.
+          createdAt: existing?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+        await db.championships.put(record);
+        return ok(record);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'write-failed'));
+      }
+    },
+
+    async listChampionships() {
+      try {
+        const records = await db.championships.orderBy('updatedAt').reverse().toArray();
+        return ok(records.map(toChampionshipSummary));
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async getChampionship(id) {
+      try {
+        const record = await db.championships.get(id);
+        if (record === undefined) {
+          return err({ kind: 'not-found', message: `No saved championship with id "${id}".` });
+        }
+        return ok(record);
+      } catch (error: unknown) {
+        return err(toStoreError(error, 'read-failed'));
+      }
+    },
+
+    async removeChampionship(id) {
+      try {
+        await db.championships.delete(id);
         return ok(undefined);
       } catch (error: unknown) {
         return err(toStoreError(error, 'write-failed'));
