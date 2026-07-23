@@ -53,7 +53,7 @@ export const EventFeed = ({
   if (notable.length === 0) return null;
 
   return (
-    <ul className="flex w-[19rem] flex-col gap-1">
+    <ul className="flex w-[19rem] max-w-full flex-col gap-1">
       {notable.map((event, index) => (
         <li
           key={`${event.tick}-${event.type}-${index}`}

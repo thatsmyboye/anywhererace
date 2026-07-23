@@ -45,7 +45,7 @@ export const PlaybackControls = ({
 
   return (
     <div className="pointer-events-auto flex w-full max-w-2xl flex-col gap-2 rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 md:gap-2">
         <button
           type="button"
           onClick={onPause}
@@ -75,11 +75,13 @@ export const PlaybackControls = ({
           onClick={onSkipToEnd}
           disabled={finished}
           className={buttonClass(false)}
+          aria-label="Skip to the end of the race"
         >
-          Skip to end
+          <span className="md:hidden">Skip</span>
+          <span className="hidden md:inline">Skip to end</span>
         </button>
 
-        <span className="ml-auto text-sm tabular-nums text-[#e6ebf2]">
+        <span className="ml-auto text-xs tabular-nums text-[#e6ebf2] md:text-sm">
           {formatDurationS(elapsedS, 1)}
         </span>
       </div>
@@ -113,7 +115,7 @@ export const PlaybackControls = ({
 
 const buttonClass = (active: boolean): string =>
   [
-    'rounded px-2.5 py-1 text-sm font-medium transition-colors',
+    'rounded px-2 py-1 text-sm font-medium transition-colors md:px-2.5',
     'disabled:cursor-not-allowed disabled:opacity-40',
     active
       ? 'bg-[#4da3ff] text-[#0b0e13]'

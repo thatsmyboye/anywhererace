@@ -28,6 +28,11 @@ import { UnitToggle, useUnits } from '../../units';
  * to live — which matters more than it sounds, because a leg that fails to
  * route has to be attributable to a specific corner rather than reported as a
  * general failure at save time.
+ *
+ * On a phone the same panel sits *under* the map instead, capped to under half
+ * the screen and collapsible to its header row — a 320px sidebar would leave a
+ * sliver of map, and the map is where the track gets drawn. Desktop keeps the
+ * side-by-side layout unchanged.
  */
 
 export type TrackBuilderProps = {
@@ -68,6 +73,10 @@ export const TrackBuilder = ({
   const builder = useTrackBuilder({ routing, elevation });
   const { actions } = builder;
   const units = useUnits();
+
+  // Mobile only: whether the panel below the map is expanded or folded to its
+  // header row. Desktop ignores it — the sidebar is always fully shown there.
+  const [panelOpen, setPanelOpen] = useState(true);
 
   // A fresh object per selection, so picking the same place twice moves the
   // camera twice — a user who has panned away since expects it to go back.
@@ -117,14 +126,26 @@ export const TrackBuilder = ({
   const canSave = builder.complete && builder.waypoints.length >= 2 && !builder.saving;
 
   return (
-    <div className="flex h-full w-full bg-[#0b0e13] text-[#e6ebf2]">
-      <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r border-[#2b3543] bg-[#161b24] p-4">
+    <div className="flex h-full w-full flex-col-reverse bg-[#0b0e13] text-[#e6ebf2] md:flex-row">
+      <aside
+        className={`flex w-full shrink-0 flex-col gap-3 border-t border-[#2b3543] bg-[#161b24] p-4 md:w-80 md:border-r md:border-t-0 ${
+          panelOpen ? 'max-h-[45dvh] overflow-y-auto' : 'max-h-[3.25rem] overflow-hidden'
+        } md:max-h-none md:overflow-y-auto`}
+      >
         <div className="flex items-center justify-between">
           <h1 className="text-sm font-semibold uppercase tracking-wider text-[#8d9bb0]">
             Track builder
           </h1>
           <div className="flex items-center gap-2">
             <UnitToggle />
+            <button
+              type="button"
+              onClick={() => setPanelOpen((open) => !open)}
+              aria-expanded={panelOpen}
+              className={`${ghostButton} md:hidden`}
+            >
+              {panelOpen ? 'Hide' : 'Show'}
+            </button>
             {onCancel === undefined ? null : (
               <button type="button" onClick={onCancel} className={ghostButton}>
                 Close
@@ -296,9 +317,14 @@ export const TrackBuilder = ({
           </div>
         )}
         {builder.waypoints.length === 0 ? (
-          <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
-            <p className="rounded-full border border-[#2b3543] bg-[#161b24]/90 px-4 py-2 text-sm text-[#8d9bb0] backdrop-blur">
-              Click anywhere on the map to drop your first waypoint
+          // Below the search box on mobile, where the box spans most of the
+          // width; beside it on desktop, where there is room for both.
+          <div className="pointer-events-none absolute inset-x-0 top-[4.5rem] flex justify-center md:top-6">
+            <p className="rounded-full border border-[#2b3543] bg-[#161b24]/90 px-4 py-2 text-center text-sm text-[#8d9bb0] backdrop-blur">
+              <span className="md:hidden">Tap the map to drop your first waypoint</span>
+              <span className="hidden md:inline">
+                Click anywhere on the map to drop your first waypoint
+              </span>
             </p>
           </div>
         ) : null}

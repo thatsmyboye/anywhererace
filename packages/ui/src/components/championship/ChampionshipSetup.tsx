@@ -92,7 +92,7 @@ export const ChampionshipSetup = ({ onCreate, onCancel }: ChampionshipSetupProps
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-5 overflow-y-auto p-8 text-[#e6ebf2]">
+    <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-5 overflow-y-auto p-4 text-[#e6ebf2] md:p-8">
       <header className="flex items-baseline justify-between">
         <div>
           <button

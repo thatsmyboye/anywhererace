@@ -797,6 +797,19 @@ These are unresolved. Ask before assuming:
   user alone; racers are drawn as an OkLCH-spaced colour plus a ring pattern
   plus a number, so any two are distinguishable on two channels; dark theme
   only. Auto-follow camera modes are noted in `IDEAS.md` rather than built.
+- **Mobile is the same app, adapted below Tailwind's `md` breakpoint; desktop is
+  the reference and never moves.** Mobile styles live in the base classes with the
+  desktop value re-asserted at `md:` (or `sm:` where a column can afford to return
+  earlier), so a change for phones cannot leak upward. The two layouts that could
+  not survive shrinking got mobile-specific structure: the track builder stacks the
+  map over its panel, with the panel capped under half the screen and collapsible
+  to its header row; the race view shows one floating panel at a time behind a
+  Timing / Feed / Map switcher above the transport controls, because a phone has
+  no room for the tower and the feed at once — the header, with its navigation
+  link, stays regardless. Tables that would crush their columns (roster,
+  classification) scroll sideways inside their own container instead of reflowing,
+  and the classification's best-lap column yields entirely on the narrowest
+  screens. Bottom-anchored controls pad for `env(safe-area-inset-bottom)`.
 - **"Real forecast" means both, defaulting to now.** A race bakes the forecast for
   the moment it was created unless the user picks a scheduled future start, in which
   case it bakes the forecast for that instant. `WeatherSpec`'s `live` variant stores
