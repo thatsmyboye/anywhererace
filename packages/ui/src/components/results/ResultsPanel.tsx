@@ -76,7 +76,7 @@ export const ResultsPanel = ({
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col bg-[#0b0e13]/95 backdrop-blur">
-      <header className="flex shrink-0 items-center gap-3 border-b border-[#2b3543] px-5 py-3">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#2b3543] px-4 py-3 md:px-5">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold text-[#e6ebf2]">Results</h2>
           <p className="truncate text-xs text-[#8d9bb0]">
@@ -97,7 +97,7 @@ export const ResultsPanel = ({
         </button>
       </header>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 overflow-y-auto p-5">
+      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 overflow-y-auto p-4 md:gap-5 md:p-5">
         {versionMismatch === undefined ? null : (
           <p className="rounded border border-[#ffb020]/40 bg-[#ffb020]/10 px-3 py-2 text-xs leading-snug text-[#ffb020]">
             This race was created with simulation version {versionMismatch.savedWith}; you are
@@ -185,15 +185,19 @@ const Classification = ({
         field. The map is behind this panel, so choosing one takes you back to it.
       </p>
     )}
-    <div className="overflow-hidden rounded-lg border border-[#2b3543]">
+    {/* Scrolls sideways on a phone rather than squeezing the columns; the
+        best-lap column yields entirely on the narrowest screens. */}
+    <div className="overflow-x-auto rounded-lg border border-[#2b3543]">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-[#2b3543] bg-[#1f2632] text-left text-[11px] uppercase tracking-wide text-[#8d9bb0]">
             <th className="w-10 px-2 py-1.5 font-semibold">Pos</th>
             <th className="px-2 py-1.5 font-semibold">Racer</th>
-            <th className="w-28 px-2 py-1.5 text-right font-semibold">Time</th>
-            <th className="w-24 px-2 py-1.5 text-right font-semibold">Gap</th>
-            <th className="w-24 px-2 py-1.5 text-right font-semibold">Best lap</th>
+            <th className="w-24 px-2 py-1.5 text-right font-semibold md:w-28">Time</th>
+            <th className="w-20 px-2 py-1.5 text-right font-semibold md:w-24">Gap</th>
+            <th className="hidden w-24 px-2 py-1.5 text-right font-semibold sm:table-cell">
+              Best lap
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -253,7 +257,7 @@ const Classification = ({
                       : '—'
                     : `+${finisher.gapToWinnerS.toFixed(3)}`}
                 </td>
-                <td className="px-2 py-1 text-right tabular-nums text-[#8d9bb0]">
+                <td className="hidden px-2 py-1 text-right tabular-nums text-[#8d9bb0] sm:table-cell">
                   {finisher.bestLapS === undefined ? '—' : formatDurationS(finisher.bestLapS, 2)}
                 </td>
               </tr>

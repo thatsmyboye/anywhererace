@@ -60,7 +60,7 @@ export const ChampionshipView = ({
   );
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-8 text-[#e6ebf2]">
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 overflow-y-auto p-4 text-[#e6ebf2] md:p-8">
       <header className="flex items-baseline justify-between gap-3">
         <div className="min-w-0">
           <button

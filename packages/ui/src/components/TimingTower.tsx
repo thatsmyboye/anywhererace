@@ -91,7 +91,7 @@ export const TimingTower = ({
   const leaderLap = rows[0]?.state.lap ?? 0;
 
   return (
-    <div className="flex max-h-[70vh] w-[19rem] flex-col overflow-hidden rounded-lg border border-[#2b3543] bg-[#161b24]/90 backdrop-blur">
+    <div className="flex max-h-[38dvh] w-[19rem] max-w-full flex-col overflow-hidden rounded-lg border border-[#2b3543] bg-[#161b24]/90 backdrop-blur md:max-h-[70vh]">
       <header className="flex items-baseline justify-between border-b border-[#2b3543] px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-[#8d9bb0]">
           Timing

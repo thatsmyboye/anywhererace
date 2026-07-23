@@ -90,7 +90,7 @@ export const RaceSetup = ({
         <UnitToggle className="ml-auto shrink-0" />
       </header>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 overflow-y-auto p-5">
+      <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 overflow-y-auto p-4 md:p-5">
         <section className="grid grid-cols-2 gap-x-6 gap-y-3 md:grid-cols-4">
           <label className="flex flex-col gap-1">
             <span className={labelClass}>Vehicle</span>
@@ -238,7 +238,7 @@ export const RaceSetup = ({
           <RosterTable roster={setup.roster} palette={setup.palette} onChange={actions.updateRacer} />
         </section>
 
-        <section className="flex items-center gap-3">
+        <section className="flex flex-wrap items-center gap-3">
           <label className="flex flex-col gap-1">
             <span className={labelClass}>Seed</span>
             <input
@@ -256,7 +256,7 @@ export const RaceSetup = ({
         </section>
       </div>
 
-      <footer className="flex shrink-0 items-center gap-4 border-t border-[#2b3543] bg-[#161b24] px-5 py-3">
+      <footer className="flex shrink-0 items-center gap-4 border-t border-[#2b3543] bg-[#161b24] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-5 md:pb-3">
         <p className="text-xs tabular-nums text-[#8d9bb0]">
           {units.distance(setup.raceDistanceM)}
           <span className="mx-1.5 text-[#2b3543]">·</span>

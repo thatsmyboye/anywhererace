@@ -636,7 +636,9 @@ export const App = () => {
           header={
             <header className="rounded-lg border border-[#2b3543] bg-[#161b24]/90 px-3 py-2 backdrop-blur">
               <div className="flex items-baseline justify-between gap-3">
-                <h1 className="text-sm font-semibold text-[#e6ebf2]">{race.track.name}</h1>
+                <h1 className="min-w-0 truncate text-sm font-semibold text-[#e6ebf2]">
+                  {race.track.name}
+                </h1>
                 <span className="flex items-center gap-2">
                   <UnitToggle className="self-center" />
                   <button

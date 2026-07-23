@@ -63,6 +63,10 @@ export const RaceView = ({
   // the results panel because the map it colours is underneath the panel, and
   // dismissing the panel is how you get a clear look at it.
   const [heatRacerId, setHeatRacerId] = useState<string | undefined>(undefined);
+  // Mobile only: which floating panel is on screen. A phone has no room for the
+  // tower and the feed at once, so below md a switcher shows one — or neither,
+  // for a clear look at the map. Desktop ignores it and shows both, as always.
+  const [mobilePanel, setMobilePanel] = useState<'timing' | 'feed' | 'map'>('timing');
   const race = useRaceClient({
     track,
     config,
@@ -108,26 +112,58 @@ export const RaceView = ({
 
       {/* Overlay. Ignores pointer events so the map stays draggable underneath;
           individual panels opt back in. */}
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="pointer-events-auto flex flex-col gap-3">
+      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:p-4 md:pb-4">
+        <div className="flex flex-col items-start gap-2 md:flex-row md:items-start md:justify-between md:gap-4">
+          <div className="pointer-events-auto flex max-w-full flex-col gap-2 md:gap-3">
             {header}
-            <TimingTower
-              snapshot={race.snapshot}
-              racers={race.racers}
-              racersById={race.racersById}
-              totalLaps={totalLaps}
-              lapLengthM={track.lengthMeters}
-              result={race.result}
-            />
+            <div className={`${mobilePanel === 'timing' ? 'block' : 'hidden'} md:block`}>
+              <TimingTower
+                snapshot={race.snapshot}
+                racers={race.racers}
+                racersById={race.racersById}
+                totalLaps={totalLaps}
+                lapLengthM={track.lengthMeters}
+                result={race.result}
+              />
+            </div>
           </div>
 
-          <div className="pointer-events-auto">
+          <div
+            className={`pointer-events-auto max-w-full ${mobilePanel === 'feed' ? 'block' : 'hidden'} md:block`}
+          >
             <EventFeed events={race.feed} racersById={race.racersById} format={format} />
           </div>
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <div
+            role="group"
+            aria-label="Which panel to show over the map"
+            className="pointer-events-auto flex overflow-hidden rounded-lg border border-[#2b3543] bg-[#161b24]/90 backdrop-blur md:hidden"
+          >
+            {(
+              [
+                ['timing', 'Timing'],
+                ['feed', 'Feed'],
+                ['map', 'Map'],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMobilePanel(value)}
+                aria-pressed={mobilePanel === value}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  mobilePanel === value
+                    ? 'bg-[#4da3ff] text-[#0b0e13]'
+                    : 'text-[#8d9bb0] hover:bg-[#2b3543] hover:text-[#e6ebf2]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <PlaybackControls
             speed={race.speed}
             finished={race.status === 'finished'}

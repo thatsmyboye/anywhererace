@@ -21,8 +21,11 @@ export type RosterTableProps = {
 };
 
 export const RosterTable = ({ roster, palette, onChange }: RosterTableProps) => (
-  <div className="overflow-hidden rounded-lg border border-[#2b3543]">
-    <table className="w-full border-collapse text-sm">
+  // On a phone the table scrolls sideways rather than crushing the name column
+  // to nothing; every desktop container is wider than the minimum, so there the
+  // layout is untouched.
+  <div className="overflow-x-auto rounded-lg border border-[#2b3543]">
+    <table className="w-full min-w-[36rem] border-collapse text-sm">
       <thead>
         <tr className="border-b border-[#2b3543] bg-[#1f2632] text-left text-[11px] uppercase tracking-wide text-[#8d9bb0]">
           <th className="w-10 px-2 py-1.5 font-semibold">#</th>
