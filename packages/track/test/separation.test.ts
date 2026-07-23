@@ -81,9 +81,12 @@ describe('the separation sweep', () => {
       expect(climbs).toHaveLength(1);
       const climb = climbs[0] as (typeof climbs)[number];
       expect(covers(climb, 700)).toBe(true);
-      expect(climb.detail).toContain('6.0%');
-      // 600m at 6% is 36 vertical meters.
-      expect(climb.detail).toContain('36m');
+      expect(climb.detail).toMatchObject({ kind: 'climb' });
+      const detail = climb.detail as { meanGradient: number; gainM: number };
+      expect(detail.meanGradient).toBeCloseTo(0.06, 5);
+      // 600m at 6% is 36 vertical meters — 35.7 here, because a run of nodes is
+      // measured across the gaps between them and so is one spacing shorter.
+      expect(detail.gainM).toBeCloseTo(36, 0);
     });
 
     it('ignores a drag shallower than the climb threshold', () => {
@@ -130,7 +133,7 @@ describe('the separation sweep', () => {
       const narrows = sweep(nodes).filter((p) => p.kind === 'narrows');
 
       expect(narrows).toHaveLength(1);
-      expect((narrows[0] as { detail: string }).detail).toContain('2.5m wide');
+      expect(narrows[0]?.detail).toEqual({ kind: 'narrows', tightestWidthM: 2.5 });
     });
 
     it('ignores a pinch too short to matter', () => {
@@ -153,7 +156,7 @@ describe('the separation sweep', () => {
       );
       const technical = sweep(many).filter((p) => p.kind === 'technical');
       expect(technical).toHaveLength(1);
-      expect((technical[0] as { detail: string }).detail).toMatch(/\d+ corners and junctions/);
+      expect((technical[0]?.detail as { featureCount: number }).featureCount).toBeGreaterThan(1);
     });
 
     it('counts a junction-heavy stretch even where the road is straight', () => {
@@ -172,7 +175,7 @@ describe('the separation sweep', () => {
       const rough = sweep(nodes).filter((p) => p.kind === 'surface');
 
       expect(rough).toHaveLength(1);
-      expect((rough[0] as { detail: string }).detail).toContain('cobble');
+      expect(rough[0]?.detail).toEqual({ kind: 'surface', surface: 'cobble', assumed: false });
     });
 
     it('says "assumed" when the surface was inferred rather than tagged', () => {
@@ -182,7 +185,7 @@ describe('the separation sweep', () => {
           : {},
       );
       const rough = sweep(nodes).filter((p) => p.kind === 'surface');
-      expect((rough[0] as { detail: string }).detail).toContain('assumed gravel');
+      expect(rough[0]?.detail).toEqual({ kind: 'surface', surface: 'gravel', assumed: true });
     });
 
     it('ranks cobbles above dirt over the same distance', () => {
@@ -201,13 +204,12 @@ describe('the separation sweep', () => {
   });
 
   describe('exposed stretches', () => {
-    it('flags a long constant-bearing road, and says it depends on the wind', () => {
+    it('flags a long constant-bearing road, capped because it depends on the wind', () => {
       const nodes = makeNodes(4000, (d) => (d >= 2000 ? { bearing: 180 } : {}));
       const exposed = sweep(nodes).filter((p) => p.kind === 'exposed');
 
       expect(exposed).toHaveLength(2);
       for (const point of exposed) {
-        expect(point.detail).toContain('crosswind');
         // Capped below the unconditional kinds: it only separates if it blows.
         expect(point.severity).toBeLessThanOrEqual(SEPARATION.maxExposedSeverity);
       }

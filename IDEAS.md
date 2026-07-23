@@ -84,36 +84,43 @@ share a season. The share codec and the OG card are per-race today.
 
 ## Left over from the peloton change
 
-The peloton entry that used to head the v2 list is built — see "Riding in a
-bunch" in CLAUDE.md. Four things it turned up and did not do:
+The peloton work is built, and so are three of the four follow-ups it turned up:
+the front rotates properly, attacks read the field as well as the road, and a
+dropped rider decides whether to chase, sit up, or wait. See "Riding in a bunch"
+in CLAUDE.md. What is still open:
 
-**Rotation on the front is averaged, not simulated.** Every member of a group
-gets the same `rotationShare` credit for turns shared out, which is a stand-in
-for riders actually taking pulls and swinging off. It gets the aggregate right —
-a bunch rides faster than any of its members could alone — but it means nobody
-is ever individually *on the front doing the work*, so a rider cannot be worn
-down by having spent the race there, and a team cannot bury itself for a leader.
-Modelling the rotation properly needs a notion of whose turn it is, which is the
-first thing in the sim that would look like tactics between racers rather than
-within one.
+**The echelon has no lateral truth to it.** Deliberately deferred rather than
+missed. It is expressed as a reset of shelter depth, which produces the right
+per-rider outcome — a rider past the width of the road loses most of their tow —
+without any rider ever having a position across the road. The sim is 1D along
+the route and should stay that way, but it does mean the map cannot draw an
+echelon, and drawing one is most of what makes them legible to a viewer.
 
-**Attacks are a roll, not a plan.** `considerAttack` reads the road ahead and
-the racer's own traits, and nothing else. It cannot see that the race is already
-up the road, that the rider is the only one left who can chase, or that three of
-their rivals just went. Reading the *field* as well as the road is the natural
-next increment and `bunch.ts` already computes most of what it would need.
+**Echelons do not change race results, only individual riders.** Worth knowing
+before anyone tunes them. The mechanism is strong: on a 5m road a full crosswind
+takes a rider four wheels deep from 0.77 of the maximum tow to 0.06. It is not
+detectable in a finishing order, because the field reorganises around it —
+riders who lose the shelter drift back, chains stop growing past an echelon's
+width, and everyone settles into *some* echelon with a workable tow. Across ten
+seeds a 12 m/s crosswind moved mean finishing time by 0.2%, in the wrong
+direction, and left the field slightly *less* fragmented. Making a crosswind
+decide a race probably needs the lateral structure above, so that being caught on
+the wrong side of a split is a place you can be rather than a number you have.
 
-**The echelon has no lateral truth to it.** It is expressed as a reset of
-shelter depth, which produces the right outcome — the riders past the width of
-the road get nothing and the field strings out — without any rider ever having a
-position across the road. That is deliberate, since the sim is 1D along the
-route and should stay that way, but it does mean the map cannot draw an echelon,
-and drawing one is most of what makes them legible to a viewer.
+**Leading does not cost you the race.** A rider on the front now genuinely works
+— above their own sustainable effort, drawn from the reservoir — which is the
+thing the averaged credit could never do. But over both a 30-minute circuit and a
+50km road race with an identical field, the riders who spent the most time on the
+front finished *better*, not worse: at the front of a bunch, having done the work
+and being ahead on the road are the same thing. For fatigue to decide anything, a
+rider needs a reason to bury themselves for somebody who is not them, which is
+team tactics — the first thing in the sim that would be about relationships
+between racers rather than traits within one.
 
-**A dropped rider does not know they are dropped.** They ride their own pace and
-the gap grows. Real riders sit up, or chase, or wait for the next group back;
-which of those they do is exactly the sort of thing `composure` and `ambition`
-are for.
+**Nobody sits up for anybody.** The dropped-rider model covers a racer reacting
+to their own situation. It has no notion of waiting for a team-mate, refusing to
+work with a rival, or a group agreeing to collaborate — all of which are the same
+missing concept as above.
 
 ---
 
@@ -126,29 +133,40 @@ Nothing in the sim would need to change; it is purely an editor.
 **A "why did they lose" explainer on the results page.** The event log plus the
 debug toggles make this tractable: re-run the same seed with `incidents: false`
 and diff the finishing order to say "they lost 12 seconds to that spin on lap
-4". This would be cheap and unusually satisfying.
+4". This would be cheap and unusually satisfying, and the track heat map is now
+most of the *where* — what is missing is the *why*.
 
-**Sector-level heat map on the track.** The baker already computes curvature,
-gradient and surface per 5m node; overlaying where each racer gained and lost
-time against the field is mostly a rendering job.
+**A field-spread heat map**, alongside the per-racer one that is built. Same
+segment timing, different reading: colour each stretch by how much the field
+came apart through it, and you have where the race was actually decided rather
+than where one racer lost it. It would sit naturally beside the separation
+points, which predict the same thing from the road alone — and comparing the
+two would say how good that prediction was.
 
 **Ghost replay against a previous race on the same track.** Determinism makes
 this nearly free — two seeds, same track, render both.
 
-**A "find nearest legal loop" helper** for circuit building on one-way networks.
-CLAUDE.md asks for this in the builder. Now that a real router is wired up this
-is finally tractable: Valhalla reports an unroutable leg distinctly from an
-outage, so the builder already knows *which* corner is impossible — the missing
-piece is searching nearby positions for one that closes the loop.
+**A wider legal-loop search.** The helper that ships spirals out to 180m from
+the endpoints of a broken leg and gives up, because every candidate costs a
+request to a free shared router and a sequential search of sixty of them already
+takes the better part of a minute. Valhalla's `sources_to_targets` matrix
+endpoint would answer a whole ring in one request, which would make a much wider
+and finer search affordable — worth doing if the helper turns out to give up
+more often than it succeeds.
 
-**Insert a waypoint into an existing leg.** Right now a waypoint can only be
-appended, so refining the middle of a long route means clearing and starting
-again. Dragging a point off the route line to split a leg is the standard
-gesture and the leg model already supports it.
+**Dragging the route line itself**, rather than the handle at the middle of it.
+Insert handles ship, and they are the discoverable version — you can see where
+a waypoint would go before you commit to it. Grabbing the line anywhere along
+its length is the gesture people know from Google Maps, and it would want the
+line hit-tested under the cursor and the map's own drag suppressed for that
+gesture. Worth doing only if the midpoint handles turn out to feel restrictive
+on long legs.
 
-**Snap the drawn route to a saved track's start line.** Start and finish are
-currently pinned to the first waypoint; letting the user drag the line along the
-route would make circuits far more raceable.
+**A grid, laid out behind the start line.** The line can be placed now, but
+every racer still begins at the same distance and is separated only by their
+lateral offset. Real starting grids are staggered back down the road, which
+would make the first corner mean something — and the line having somewhere
+sensible to be is the prerequisite that was missing.
 
 **Auto-follow camera modes.** The race view deliberately fits the whole track
 and then leaves the camera alone. Two modes were considered and parked: follow

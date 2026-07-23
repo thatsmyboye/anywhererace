@@ -50,8 +50,15 @@ export type SharedRace = {
  * fields in `SharedRace` and how they compress — is different, which is a
  * decode-time concern. A link carrying a schema newer than this build
  * understands cannot be opened, and says so rather than mis-parsing.
+ *
+ * 2 — a separation point's `detail` became measurements rather than a baked
+ * sentence, so the units toggle could reach it. Only a caption is affected and
+ * the race would replay identically, but a build that predates the change would
+ * print `[object Object]` under the course description, and being told to update
+ * is a better answer than being shown that. Old links still open here: the guard
+ * is one-directional, and the string form is still rendered verbatim.
  */
-export const SHARE_SCHEMA_VERSION = 1;
+export const SHARE_SCHEMA_VERSION = 2;
 
 /**
  * A one-character wire tag ahead of the base64url body, so the decoder can tell
@@ -82,7 +89,12 @@ export type ShareError = {
  */
 export const encodeSharedRace = (race: SharedRace): string => {
   const json = JSON.stringify(race, nonFiniteReplacer);
-  const compressed = gzipSync(strToU8(json), { level: 9 });
+  // `mtime: 0` is load-bearing, not tidiness. gzip carries a modification time
+  // in its header and fflate fills it from the clock, so the same race encoded
+  // twice a second apart produced two different links — which contradicts the
+  // whole premise that a shared race is its inputs, and made the determinism
+  // test fail only when a run happened to straddle a second boundary.
+  const compressed = gzipSync(strToU8(json), { level: 9, mtime: 0 });
   return WIRE_PREFIX + base64UrlEncode(compressed);
 };
 

@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 import type { Track } from '@anywhererace/core';
+import type { SegmentHeat } from '@anywhererace/sim';
 import { positionOnTrack, trackBounds, trackToGeoJSON } from '@anywhererace/track';
+import { heatGeoJSON } from '../heatGeometry';
 import { buildMarkerImages, markerImageId } from '../markers';
 import { THEME } from '../palette';
 import type { FrameBuffer, RacerView } from '../useRaceClient';
@@ -25,6 +27,7 @@ import type { FrameBuffer, RacerView } from '../useRaceClient';
 const TRACK_SOURCE = 'race-track';
 const RACER_SOURCE = 'race-racers';
 const START_SOURCE = 'race-start-line';
+const HEAT_SOURCE = 'race-heat';
 
 export type RaceMapProps = {
   track: Track;
@@ -33,9 +36,21 @@ export type RaceMapProps = {
   /** MapLibre style URL. */
   styleUrl: string;
   attribution: string;
+  /**
+   * Where one racer gained and lost against the field, drawn over the route.
+   * Undefined leaves the track its plain colour.
+   */
+  heat?: SegmentHeat | undefined;
 };
 
-export const RaceMap = ({ track, racers, frameRef, styleUrl, attribution }: RaceMapProps) => {
+export const RaceMap = ({
+  track,
+  racers,
+  frameRef,
+  styleUrl,
+  attribution,
+  heat,
+}: RaceMapProps) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | undefined>(undefined);
   const racersRef = useRef(racers);
@@ -82,6 +97,21 @@ export const RaceMap = ({ track, racers, frameRef, styleUrl, attribution }: Race
     }
     addRacerLayers(map, racers);
   }, [racers]);
+
+  // --- the heat overlay ----------------------------------------------------
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map === undefined) return;
+
+    const apply = (): void => {
+      const source = map.getSource<GeoJSONSource>(HEAT_SOURCE);
+      if (source === undefined) return;
+      source.setData(heatGeoJSON(track, heat));
+    };
+
+    if (map.isStyleLoaded()) apply();
+    else map.once('load', apply);
+  }, [track, heat]);
 
   // --- the render loop -----------------------------------------------------
   useEffect(() => {
@@ -148,6 +178,27 @@ const addTrackLayers = (map: MapLibreMap, track: Track): void => {
     },
   });
 
+  // Above the route line and below the racers: the overlay is about the road,
+  // so it should colour the road, but it must never hide who is on it.
+  map.addSource(HEAT_SOURCE, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: `${HEAT_SOURCE}-line`,
+    type: 'line',
+    source: HEAT_SOURCE,
+    layout: { 'line-cap': 'butt', 'line-join': 'round' },
+    paint: {
+      // Colour is computed per band rather than through an expression, because
+      // the ramp is scaled to the race's own peak and MapLibre would need that
+      // peak baked into the stops anyway.
+      'line-color': ['get', 'color'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 12, 5, 18, 20],
+      'line-opacity': ['get', 'opacity'],
+    },
+  });
+
   const start = positionOnTrack(track, 0);
   map.addSource(START_SOURCE, {
     type: 'geojson',
@@ -197,6 +248,13 @@ const addRacerLayers = (map: MapLibreMap, racers: readonly RacerView[]): void =>
         // would make a bunch look like a single car.
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+        // When markers pile up at low zoom, draw the leader on top. Source
+        // order does not decide this for a symbol layer with overlap allowed —
+        // without a sort key MapLibre stacks by viewport-Y, so whichever racer
+        // happens to sit lowest on screen wins, which is usually a backmarker.
+        // A higher sort key draws later (on top); position 1 is the leader, so
+        // negating position puts the leader highest.
+        'symbol-sort-key': ['*', ['get', 'position'], -1],
         // The name fades in past a zoom threshold, per CLAUDE.md.
         'text-field': ['get', 'name'],
         'text-font': ['Noto Sans Regular'],
@@ -302,6 +360,8 @@ const buildRacerFeatures = (
   }
 
   // Draw the leaders last so they sit on top of the pack they are lapping.
+  // This governs the fallback circle layer, where source order is draw order;
+  // the icon symbol layer is ordered by its `symbol-sort-key` instead.
   features.sort((a, b) => Number(b.properties.position) - Number(a.properties.position));
   return { features: { type: 'FeatureCollection', features }, settled: t >= 1 };
 };

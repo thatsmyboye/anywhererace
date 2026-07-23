@@ -5,6 +5,7 @@ import type { MistakeKind, RaceEvent } from './events';
 import type { TrackProfile } from './profile';
 import { nodeIndexAt } from './profile';
 import type { RaceSetup, RacerRuntime } from './setup';
+import { attackChance, chaseChance, echelonDepth, pullLengthS } from './tactics';
 import type { DebugToggles } from './tuning';
 import { TICK_SECONDS, TUNING } from './tuning';
 
@@ -65,16 +66,23 @@ export const tickRacer = (
   const progress = clamp01(racer.distanceM / setup.raceDistanceM);
 
   // --- 3. Personality overlay -------------------------------------------
-  // Deciding to go comes first, because an attack changes the effort below and
-  // because it is a decision about the road ahead rather than about this
-  // instant. Nothing is emitted when a racer commits: whether the move actually
-  // opens a gap is the ground truth, and `groups.ts` reports that when it
-  // happens — the same reason an overtake is logged on the swap and not on the
-  // attempt.
-  if (toggles.tactics) considerAttack(racer, bunch, nodeIndex, progress, ctx);
+  // Three decisions, all of them before effort because all of them change it:
+  // whose turn it is on the front, what a racer who has lost the wheel intends
+  // to do about it, and whether to attack. The first two are stretches of time
+  // rather than instants, which is why they are state machines rather than
+  // per-tick reads.
+  //
+  // Nothing is emitted when a racer commits to a move: whether it actually opens
+  // a gap is the ground truth, and `groups.ts` reports that when it happens —
+  // the same reason an overtake is logged on the swap and not on the attempt.
+  if (toggles.bunch) updatePull(racer, bunch, ctx);
+  if (toggles.tactics) {
+    updateDroppedResponse(racer, bunch, ctx);
+    considerAttack(racer, bunch, nodeIndex, progress, ctx);
+  }
 
   // Computed after, because effort feeds the power-limited speed below.
-  const effort = computeEffort(racer, ctx, progress);
+  const effort = computeEffort(racer, bunch, ctx, progress);
 
   // --- 1. Target speed: the power-limited term --------------------------
   let powerMs = topSpeedMs * effort;
@@ -113,31 +121,25 @@ export const tickRacer = (
 
   let dirtyAirGripLoss = 0;
   if (toggles.draft) {
-    // How much air is being broken for this racer, in wheels. Two sources, and
-    // they add:
+    // How much air is being broken for this racer, in wheels: every wheel ahead
+    // of them in an unbroken slipstream chain, scaled by how close they actually
+    // are to the one directly in front.
     //
-    //   The wheels immediately ahead — the classic pairwise tow, scaled by how
-    //   close this racer actually is to the one in front.
+    // This used to carry a second term, a flat credit for the turns a group
+    // shares out, so that the racer on the front was not modelled as riding
+    // solo. That credit is gone: the rider on the front now takes an actual turn
+    // there, above their own sustainable effort, and pays for it. See
+    // `TUNING.bunch.pull`.
     //
-    //   The turns their group shares out. Nobody stays on the front of a bunch;
-    //   they rotate, and averaged over any length of road that makes the *group*
-    //   more efficient than any of its members riding alone — including whoever
-    //   happens to be leading it at this instant. Without this term the racer on
-    //   the front is modelled as a solo rider and the bunch can never sustain
-    //   more than its least sheltered member's pace.
-    //
-    // Additive, and with the rotation term much the smaller of the two, because
-    // the difference between the racer on the front and the racers behind them
-    // is load-bearing: it is the only thing that makes a follower faster than a
-    // leader, and therefore the only thing that ever closes a gap. Taking the
-    // larger of the two instead — which is what this did first — hands the
-    // leader the same shelter as everyone else, nobody has a reason to catch
-    // anybody, and a peloton dissolves into individuals within ten minutes.
-    const wheelDepth =
+    // What has not changed is why the leader must end up with *less* than the
+    // riders behind them. That difference is the only thing that makes a
+    // follower faster than a leader, and therefore the only thing in the model
+    // that ever closes a gap. Erasing it dissolves a peloton into individuals
+    // within ten minutes.
+    const rawDepth =
       ahead !== undefined && bunch.shelterDepth > 0
         ? bunch.shelterDepth * (1 - ahead.gapS / TUNING.draft.maxGapS)
         : 0;
-    const rawDepth = wheelDepth + (bunch.groupSize - 1) * TUNING.draft.rotationShare;
 
     if (rawDepth > 0) {
       const awareness = lerp(
@@ -148,7 +150,13 @@ export const tickRacer = (
       // Saturating in depth, so the second wheel is worth far more than the
       // twentieth. In a crosswind the shelter runs out at the edge of the road
       // instead, however many riders are nominally ahead.
-      const depth = toggles.wind ? echelonDepth(rawDepth, nodeIndex, ctx) : rawDepth;
+      const depth = toggles.wind
+        ? echelonDepth(
+            rawDepth,
+            crosswindAt(nodeIndex, ctx),
+            profile.widthInVehicles[nodeIndex] as number,
+          )
+        : rawDepth;
       const shelter = depth / (depth + TUNING.draft.shelterHalfDepth);
       powerMs *= 1 + TUNING.draft.maxGainFraction * vehicle.draftBenefit * awareness * shelter;
     }
@@ -243,7 +251,12 @@ export const tickRacer = (
 // Step 3: effort
 // ---------------------------------------------------------------------------
 
-const computeEffort = (racer: RacerRuntime, ctx: TickContext, progress: number): number => {
+const computeEffort = (
+  racer: RacerRuntime,
+  bunch: BunchState,
+  ctx: TickContext,
+  progress: number,
+): number => {
   const { setup, toggles } = ctx;
   const sustainable = TUNING.effort.sustainableEffort[setup.vehicle.enduranceModel];
   let effort = sustainable * lerp(TUNING.effort.minSkillScale, 1, racer.skill);
@@ -274,6 +287,34 @@ const computeEffort = (racer: RacerRuntime, ctx: TickContext, progress: number):
         }
       }
     }
+  }
+
+  // A turn on the front. Above their own sustainable effort while doing it,
+  // which is what lets the group ride faster than a solo rider and is paid for
+  // out of the reservoir; then eased while swinging off, so the next rider can
+  // come through and the one who has been working can drift back into shelter.
+  //
+  // The ease continues after they are off the front, which is the whole point of
+  // it — a rider who went straight back to full effort the instant somebody
+  // passed them would simply take the lead again.
+  if (ctx.toggles.bunch && bunch.groupSize > 1) {
+    if (racer.swingOffUntilS > 0) effort *= TUNING.bunch.pull.swingOffEase;
+    else if (bunch.onFront) effort *= 1 + TUNING.bunch.pull.effortBoost;
+  }
+
+  // Having come off the back, and having decided what to do about it.
+  switch (racer.droppedResponse) {
+    case 'chase':
+      effort *= 1 + TUNING.bunch.dropped.chaseEffortBoost;
+      break;
+    case 'sit-up':
+      effort *= TUNING.bunch.dropped.sitUpEase;
+      break;
+    case 'wait':
+      effort *= TUNING.bunch.dropped.waitEase;
+      break;
+    case 'none':
+      break;
   }
 
   // A committed attack is a dig above whatever the pacing curve had planned.
@@ -393,67 +434,139 @@ const holdGroupPace = (
 };
 
 /**
- * Shelter depth after the crosswind has had its say.
+ * Component of the wind blowing across the direction of travel, in m/s.
  *
- * A bunch sheltering itself in still air is a column; in a crosswind the usable
- * air moves diagonally across the road and runs out at the gutter. Only as many
- * riders as the road is wide get anything, and the rider immediately past the
- * end of that echelon is in the gutter — riding alone, however many wheels are
- * nominally ahead of them. Behind that a second echelon forms, and so on down
- * the road.
- *
- * That is what the remainder expresses: a racer's depth is counted from the
- * start of *their* echelon rather than from the front of the field. Rather than
- * modelling lateral position — the sim is 1D along the route and must stay that
- * way — the wind is allowed to reach in and reset the depth that counts.
- *
- * Simply capping the depth was tried first and is almost a no-op, which is worth
- * recording because it looks so reasonable. The shelter curve saturates, so
- * holding a rider at eight wheels instead of eleven moves their tow by well
- * under a percent, and a full crosswind cost a twenty-rider bunch less time than
- * the seed-to-seed noise. Being caught out behind the split has to actually
- * hurt, or the echelon is decoration.
- *
- * The effect is interpolated in with the strength of the crosswind rather than
- * switched on, so a wind getting up progressively strings a field out instead of
- * guillotining it.
+ * The same two precomputed heading components as the headwind dot product,
+ * crossed rather than dotted. Sign is irrelevant — a crosswind from either side
+ * does the same thing to a bunch.
  */
-const echelonDepth = (depth: number, nodeIndex: number, ctx: TickContext): number => {
-  // The same two precomputed heading components as the headwind dot product,
-  // crossed rather than dotted. Sign is irrelevant — a crosswind from either
-  // side does the same thing.
+const crosswindAt = (nodeIndex: number, ctx: TickContext): number => {
   const cross =
     ctx.windEast * (ctx.profile.headingNorth[nodeIndex] as number) -
     ctx.windNorth * (ctx.profile.headingEast[nodeIndex] as number);
-  const crossMs = cross < 0 ? -cross : cross;
+  return cross < 0 ? -cross : cross;
+};
 
-  const severity = clamp01(
-    (crossMs - TUNING.draft.echelonOnsetMs) /
-      Math.max(TUNING.draft.echelonFullMs - TUNING.draft.echelonOnsetMs, 1e-6),
-  );
-  if (severity <= 0) return depth;
+/**
+ * Whose turn it is on the front.
+ *
+ * A turn ends one of two ways: the rider has done enough and swings off, or
+ * somebody comes past and the question stops being theirs. The second case needs
+ * no handling beyond noticing it, because `onFront` is re-read every tick from
+ * where everyone actually is.
+ */
+const updatePull = (racer: RacerRuntime, bunch: BunchState, ctx: TickContext): void => {
+  if (bunch.groupSize < 2) {
+    // Riding alone. No turn in progress, and the next one starts from scratch.
+    racer.pullStartedS = -1;
+    racer.swingOffUntilS = 0;
+    return;
+  }
 
-  const capacity = Math.max(
-    1,
-    (ctx.profile.widthInVehicles[nodeIndex] as number) * TUNING.draft.echelonRidersPerWidth,
-  );
-  if (depth <= capacity) return depth;
+  if (racer.swingOffUntilS > 0) {
+    // Still easing. The turn is over when the rider is genuinely back *in* the
+    // group rather than merely no longer at the head of it — being passed by one
+    // rider is not a swing off, and treating it as one leaves the strongest
+    // rider permanently on the front.
+    const target = Math.min(TUNING.bunch.pull.recoveryDepth, bunch.groupSize - 1);
+    const recovered = !bunch.onFront && bunch.shelterDepth >= target;
+    if (recovered || ctx.elapsedS >= racer.swingOffUntilS) {
+      racer.swingOffUntilS = 0;
+      racer.pullStartedS = -1;
+    }
+    return;
+  }
 
-  // Depth within this racer's own echelon. `%` on doubles is exactly specified,
-  // so this stays as reproducible as the rest of the tick.
-  const inEchelon = depth % capacity;
-  return depth + (inEchelon - depth) * severity;
+  if (!bunch.onFront) {
+    racer.pullStartedS = -1;
+    return;
+  }
+
+  if (racer.pullStartedS < 0) {
+    racer.pullStartedS = ctx.elapsedS;
+    return;
+  }
+
+  // A tired rider takes a shorter turn. This is most of what makes the last hour
+  // of a long race look different from the first: the same riders rotating, but
+  // through the front far faster and at a pace nobody can hold.
+  const fuel = ctx.toggles.endurance ? racer.reservoir : 1;
+  if (ctx.elapsedS - racer.pullStartedS >= pullLengthS(fuel)) {
+    racer.swingOffUntilS = ctx.elapsedS + TUNING.bunch.pull.maxSwingOffS;
+  }
+};
+
+/**
+ * Having lost the wheel, and deciding what to do about it.
+ *
+ * Rolled once, at the moment contact goes, and then held — a rider who has sat
+ * up does not re-decide every fifty milliseconds. Getting back into any group
+ * settles it, which is why regaining contact clears the state rather than
+ * expiring it.
+ *
+ * Going clear off the *front* is deliberately not this. A racer who has just
+ * attacked is also alone, and telling them they have been dropped would have
+ * them sit up in the middle of their own move.
+ */
+const updateDroppedResponse = (
+  racer: RacerRuntime,
+  bunch: BunchState,
+  ctx: TickContext,
+): void => {
+  const wasWithOthers = racer.lastGroupSize > 1;
+  racer.lastGroupSize = bunch.groupSize;
+
+  if (bunch.groupSize > 1) {
+    // Back among riders. Whichever way it went, it is over.
+    racer.droppedResponse = 'none';
+    racer.droppedUntilS = 0;
+    return;
+  }
+
+  // A chase is a finite dig; sitting up and waiting last as long as they last.
+  if (racer.droppedResponse === 'chase' && ctx.elapsedS >= racer.droppedUntilS) {
+    racer.droppedResponse = 'sit-up';
+    racer.droppedUntilS = 0;
+  }
+  if (racer.droppedResponse !== 'none') return;
+
+  // Nothing to react to: alone all along, off the front on purpose, or leading
+  // the race, which is the one kind of being alone worth having.
+  if (!wasWithOthers) return;
+  if (ctx.elapsedS < racer.attackingUntilS) return;
+  if (bunch.gapToGroupAheadS === Number.POSITIVE_INFINITY) return;
+
+  // The roll happens either way, even at zero odds, so that the RNG stream does
+  // not depend on how full the reservoir happened to be.
+  const fuel = ctx.toggles.endurance ? racer.reservoir : 1;
+  if (racer.rng.bool(chaseChance(racer.traits, fuel))) {
+    racer.droppedResponse = 'chase';
+    racer.droppedUntilS = ctx.elapsedS + TUNING.bunch.dropped.chaseDurationS;
+    return;
+  }
+
+  // Not chasing. Whether to soft-pedal for the group behind or simply ride the
+  // rest of the race within themselves is not a matter of temperament — it is a
+  // matter of whether there *is* a group behind worth waiting for.
+  racer.droppedResponse =
+    bunch.gapToGroupBehindS <= TUNING.bunch.dropped.waitReachS ? 'wait' : 'sit-up';
+  racer.droppedUntilS = 0;
 };
 
 /**
  * Deciding to go.
  *
- * Reads the course sweep through `profile.attackAppeal`, so a racer is far more
- * likely to commit at the foot of a climb or on the approach to a pinch point
- * than on an open straight — which is the difference between attacks happening
- * and attacks mattering. Personality decides who: `aggression` throughout,
- * `ambition` only once the race is late enough for a low-percentage move to be
- * worth anything, exactly as the traffic model reads them.
+ * Reads two things. The *road*, through `profile.attackAppeal`, so a racer is
+ * far more likely to commit at the foot of a climb or on the approach to a pinch
+ * point than on an open straight. And the *field*, through the gap to the group
+ * up the road and the size of the group they are in — because an attack is a
+ * response to the state of the race at least as much as to the terrain, and
+ * reading only the terrain meant a rider would go on a climb with equal
+ * enthusiasm whether the win was two seconds ahead or five minutes gone.
+ *
+ * Personality decides who: `aggression` throughout, `ambition` only once the
+ * race is late enough for a low-percentage move to be worth anything, exactly as
+ * the traffic model reads them.
  */
 const considerAttack = (
   racer: RacerRuntime,
@@ -463,22 +576,23 @@ const considerAttack = (
   ctx: TickContext,
 ): void => {
   if (ctx.elapsedS < racer.attackingUntilS || ctx.elapsedS < racer.attackReadyAtS) return;
-  // A racer alone on the road, or already on the front of their group, is
-  // doing the only thing available to them. There is nothing to attack from.
-  if (bunch.onFront || bunch.groupSize < 2) return;
+  // A racer alone on the road has nothing to attack from.
+  if (bunch.groupSize < 2) return;
   if (ctx.toggles.endurance && racer.reservoir < TUNING.tactics.minReservoir) return;
 
-  const traits = racer.traits;
-  const lateness = clamp01(
-    (progress - TUNING.traffic.ambitionEngagesAtProgress) /
-      Math.max(1 - TUNING.traffic.ambitionEngagesAtProgress, 1e-6),
-  );
-  const eagerness = clamp01(traits.aggression * 0.5 + traits.ambition * lateness * 0.5);
+  // Already on the front of their own group, with nothing up the road to chase,
+  // a racer is doing all there is to do. With something to chase, going to the
+  // front is precisely how they would start.
+  const nothingToChase = bunch.gapToGroupAheadS > TUNING.tactics.hopelessGapS;
+  if (bunch.onFront && nothingToChase) return;
 
-  const chance =
-    TUNING.tactics.baseAttackPerTick *
-    lerp(TUNING.tactics.minAttackMultiplier, TUNING.tactics.maxAttackMultiplier, eagerness) *
-    (1 + TUNING.tactics.selectionAppealBonus * (ctx.profile.attackAppeal[nodeIndex] as number));
+  const chance = attackChance({
+    traits: racer.traits,
+    progress,
+    roadAppeal: ctx.profile.attackAppeal[nodeIndex] as number,
+    groupSize: bunch.groupSize,
+    gapToGroupAheadS: bunch.gapToGroupAheadS,
+  });
 
   if (!racer.rng.bool(chance)) return;
 

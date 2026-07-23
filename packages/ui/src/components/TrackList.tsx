@@ -99,7 +99,7 @@ export const TrackList = ({
                 )}
               </div>
               <p className="text-xs tabular-nums text-[#8d9bb0]">
-                {(track.lengthMeters / 1000).toFixed(2)} km · {track.mode} ·{' '}
+                {units.distance(track.lengthMeters)} · {track.mode} ·{' '}
                 {track.routingProfile} · saved {formatDate(track.updatedAt)}
               </p>
             </div>
@@ -226,7 +226,8 @@ export const TrackList = ({
       </section>
     )}
   </div>
-);
+  );
+};
 
 /**
  * What was synthetic, if anything.

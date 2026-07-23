@@ -1,5 +1,5 @@
 import type {
-  SeparationKind,
+  SeparationDetail,
   SeparationPoint,
   SurfaceType,
   TrackMode,
@@ -33,9 +33,15 @@ import { BAKE, SEPARATION } from './constants';
  *
  *   It is not weather-aware. The sweep runs when the course is saved, long
  *   before any race bakes a forecast, so the one kind that depends on
- *   conditions — `exposed` — says so in its own copy rather than pretending.
- *   (The sim gets echelons on those roads anyway, but it gets them from the wind
- *   and the road width at each node, not from these points.)
+ *   conditions — `exposed` — is capped in severity and says "if there is a
+ *   crosswind" when the UI writes it up, rather than pretending. (The sim gets
+ *   echelons on those roads anyway, but it gets them from the wind and the road
+ *   width at each node, not from these points.)
+ *
+ * What it emits is measurements, not prose. A point carries the numbers behind
+ * it — mean gradient, height gained, tightest width — and the sentence is
+ * assembled where it is read, because a course baked once has to read correctly
+ * for someone in miles and for someone in kilometers.
  *
  *   It is not per-class. The thresholds are calibrated for road cycling because
  *   that is the format the question is asked about, and because it is the
@@ -178,13 +184,16 @@ const blend = (primary: number, lengthTerm: number, primaryWeight: number): numb
 const normalize = (value: number, from: number, to: number): number =>
   to === from ? 0 : clamp01((value - from) / (to - from));
 
+/**
+ * `detail` carries its own `kind`, so the point's is read off it rather than
+ * passed separately — one argument fewer and no way for the two to disagree.
+ */
 const point = (
-  kind: SeparationKind,
   run: Run,
   ctx: SweepContext,
   severity: number,
-  detail: string,
-): SeparationPoint => ({ ...spanOf(run, ctx), kind, severity, detail });
+  detail: SeparationDetail,
+): SeparationPoint => ({ ...spanOf(run, ctx), kind: detail.kind, severity, detail });
 
 // ---------------------------------------------------------------------------
 // Climbs
@@ -214,15 +223,7 @@ const findClimbs = (ctx: SweepContext): SeparationPoint[] => {
       SEPARATION.climbGradientWeight,
     );
 
-    points.push(
-      point(
-        'climb',
-        run,
-        ctx,
-        severity,
-        `${(meanGradient * 100).toFixed(1)}% for ${formatDistance(lengthM)}, ${Math.round(gainM)}m of climbing`,
-      ),
-    );
+    points.push(point(run, ctx, severity, { kind: 'climb', meanGradient, gainM }));
   }
 
   return points;
@@ -256,15 +257,7 @@ const findNarrows = (ctx: SweepContext): SeparationPoint[] => {
       SEPARATION.narrowWidthWeight,
     );
 
-    points.push(
-      point(
-        'narrows',
-        run,
-        ctx,
-        severity,
-        `down to ${tightestM.toFixed(1)}m wide for ${formatDistance(lengthM)}`,
-      ),
-    );
+    points.push(point(run, ctx, severity, { kind: 'narrows', tightestWidthM: tightestM }));
   }
 
   return points;
@@ -321,8 +314,6 @@ const findTechnical = (ctx: SweepContext): SeparationPoint[] => {
       startIndex: run.startIndex,
       endIndex: (run.endIndex + windowNodes - 1) % count,
     };
-    const lengthM = runLengthM(extended, ctx);
-
     let peakDensity = 0;
     for (const index of indices) {
       const value = density[index] as number;
@@ -336,15 +327,7 @@ const findTechnical = (ctx: SweepContext): SeparationPoint[] => {
 
     const severity = normalize(peakDensity, SEPARATION.minTechnicalDensity, 1);
 
-    points.push(
-      point(
-        'technical',
-        extended,
-        ctx,
-        severity,
-        `${features} corners and junctions in ${formatDistance(lengthM)}`,
-      ),
-    );
+    points.push(point(extended, ctx, severity, { kind: 'technical', featureCount: features }));
   }
 
   return points;
@@ -401,15 +384,7 @@ const findRoughSurfaces = (ctx: SweepContext): SeparationPoint[] => {
         SEPARATION.roughSurfaceWeight,
       );
 
-      points.push(
-        point(
-          'surface',
-          run,
-          ctx,
-          severity,
-          `${formatDistance(lengthM)} of ${assumed ? 'assumed ' : ''}${surface}`,
-        ),
-      );
+      points.push(point(run, ctx, severity, { kind: 'surface', surface, assumed }));
     }
   }
 
@@ -463,15 +438,7 @@ const findExposed = (ctx: SweepContext): SeparationPoint[] => {
         SEPARATION.maxExposedSeverity *
         normalize(lengthM, SEPARATION.minExposedLengthM, SEPARATION.fullExposedLengthM);
 
-      points.push(
-        point(
-          'exposed',
-          run,
-          ctx,
-          severity,
-          `${formatDistance(lengthM)} on one bearing — echelon country if there is a crosswind`,
-        ),
-      );
+      points.push(point(run, ctx, severity, { kind: 'exposed' }));
     }
 
     cursor += span;
@@ -496,7 +463,3 @@ const bearingDelta = (a: number, b: number): number => {
   return raw > 180 ? 360 - raw : raw;
 };
 
-// ---------------------------------------------------------------------------
-
-const formatDistance = (meters: number): string =>
-  meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;

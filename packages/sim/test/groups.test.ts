@@ -7,7 +7,13 @@ import { createRace, runRace } from '../src/race';
 import { TUNING } from '../src/tuning';
 import type { RaceInput } from '../src/types';
 import { getVehicleClass } from '../src/data/vehicles';
-import { makeConfig, makeField, makeSyntheticTrack, manualWeather } from './fixtures';
+import {
+  makeConfig,
+  makeField,
+  makeSyntheticTrack,
+  manualWeather,
+  yieldToEventLoop,
+} from './fixtures';
 
 /**
  * The field's shape, and the noise suppression it exists to make possible.
@@ -232,22 +238,32 @@ describe('race format', () => {
 });
 
 describe('the shape of the field is observation, not behavior', () => {
-  it('produces identical results and identical group events on a re-run', () => {
-    const first = run(bikeRace());
-    const second = run(bikeRace());
+  it(
+    'produces identical results and identical group events on a re-run',
+    () => {
+      const first = run(bikeRace());
+      const second = run(bikeRace());
 
-    const movesOf = (events: readonly { type: string }[]) =>
-      JSON.stringify(eventsOfType(events as never, 'group') as GroupEvent[]);
-    expect(movesOf(second)).toBe(movesOf(first));
-  });
+      const movesOf = (events: readonly { type: string }[]) =>
+        JSON.stringify(eventsOfType(events as never, 'group') as GroupEvent[]);
+      expect(movesOf(second)).toBe(movesOf(first));
+    },
+    // Two full runs of the same 24-rider, six-lap bike race its sibling below
+    // runs three of. That one was given a timeout when the tick started reading
+    // the shape of the field and it stopped fitting in the default five
+    // seconds; this one was left behind and has been failing perhaps one run in
+    // four ever since, on time rather than on any assertion.
+    30_000,
+  );
 
   it(
     'reports the same race whether it is stepped or run straight through',
-    () => {
+    async () => {
       // Group sampling is on a tick multiple, so a host stepping at 1x, 2x and
       // 8x must not see a different race from one that skipped to the end.
       const straight = runRace(bikeRace());
       expect(straight.ok).toBe(true);
+      await yieldToEventLoop();
 
       const created = createRace(bikeRace());
       if (!created.ok) throw new Error(created.error.message);
@@ -258,6 +274,7 @@ describe('the shape of the field is observation, not behavior', () => {
       const stepped = created.value.result();
       if (!stepped.ok || !straight.ok) throw new Error('race did not terminate');
       expect(stepped.value.resultHash).toBe(straight.value.resultHash);
+      await yieldToEventLoop();
 
       const reference = run(bikeRace());
       expect(JSON.stringify(eventsOfType(created.value.events, 'group'))).toBe(

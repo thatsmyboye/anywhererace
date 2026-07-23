@@ -123,6 +123,34 @@ export type FinishRecord = {
   traits: Traits;
 };
 
+/** One racer's time through each band of the lap. See `segments.ts`. */
+export type RacerSegmentTimes = {
+  racerId: RacerId;
+  /** Seconds spent in each band, summed over every *complete* traversal of it. */
+  totalS: number[];
+  /**
+   * How many complete traversals are in `totalS`, so a mean can be taken. Zero
+   * means the racer never rode that band from end to end — they retired before
+   * reaching it, or the grid dropped them into the middle of it.
+   */
+  passes: number[];
+};
+
+/**
+ * How long everyone took through each stretch of road.
+ *
+ * Bands are lap-relative and uniform, so band `i` is the same piece of road for
+ * every racer and on every lap. Deliberately not in `resultHash`: it is an
+ * observation about a race that is already fully determined by the finishing
+ * order and times, and hashing it would make the goldens sensitive to a
+ * resolution constant that has nothing to do with the physics.
+ */
+export type SegmentTiming = {
+  segmentLengthM: number;
+  segmentCount: number;
+  perRacer: RacerSegmentTimes[];
+};
+
 export type RaceResult = {
   simVersion: string;
   seed: string;
@@ -132,6 +160,8 @@ export type RaceResult = {
   durationS: number;
   totalTicks: number;
   finishers: FinishRecord[];
+  /** Where time was won and lost along the road. Not hashed; see the type. */
+  segments: SegmentTiming;
   /** Hash of finishing order and times. See `hash.ts` for what is included. */
   resultHash: string;
 };

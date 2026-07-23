@@ -124,12 +124,23 @@ describe('determinism', () => {
  * The sanity-range suite is what argues the behavior is reasonable.
  */
 const GOLDEN_HASHES: Record<string, string> = {
-  // Recorded against SIM_VERSION 0.5.0.
+  // Recorded against SIM_VERSION 0.6.0.
   //
-  // All three were regenerated for the peloton change: the tick now reads the
-  // shape of the field. Drafting became group-shaped rather than pairwise (a
-  // racer is sheltered by every wheel ahead of them, plus a share for the turns
-  // their group rotates through), groups acquired a collective pace that riders
+  // Regenerated for the tactics change on top of the peloton one. The tick now
+  // rotates the front of a group — the racer leading it rides above their own
+  // sustainable effort for a real turn and then swings off, replacing the flat
+  // shelter credit every member used to receive — reads the field as well as the
+  // road when deciding to attack, and lets a rider who has lost the wheel decide
+  // whether to chase, sit up, or wait for the group behind. All three move
+  // results, and the dropped-rider roll adds a draw to the tick, which moves the
+  // streams as well.
+  //
+  // An earlier regeneration (0.4.0 -> 0.5.0) was for the peloton change, when
+  // the tick first read the shape of the field. Drafting became group-shaped
+  // rather than pairwise (a racer is sheltered by every wheel ahead of them,
+  // plus — at the time — a share for the turns their group rotates through,
+  // which 0.6.0 replaced with the turns themselves), groups acquired a
+  // collective pace that riders
   // hold above their own limit until they empty themselves and come off, the
   // shelter collapses into an echelon in a crosswind, and racers roll against
   // the course sweep's separation points to decide where to attack. Every one
@@ -154,9 +165,9 @@ const GOLDEN_HASHES: Record<string, string> = {
   // erased the pace advantage that gates a pass; and skill scaled only the
   // straight-line term, letting riskTolerance outweigh talent on any track with
   // corners.
-  'gt-racer circuit 4 laps, 10 racers': '38723cae7d61fce3',
-  'road-cyclist point-to-point 40km, 8 racers': '0e395c191925e256',
-  'runner trail circuit, wet, 12 racers': 'cdb6f4c3ae96fb95',
+  'gt-racer circuit 4 laps, 10 racers': '24274f864476faab',
+  'road-cyclist point-to-point 40km, 8 racers': '59f069e36339e2f9',
+  'runner trail circuit, wet, 12 racers': 'c256543b407a7605',
 };
 
 describe('determinism: golden seeds', () => {

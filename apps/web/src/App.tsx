@@ -68,6 +68,7 @@ type View =
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY;
 
 export const App = () => {
+  const units = useUnits();
   const [degraded, setDegraded] = useState<DegradedState>({ routing: false, elevation: false, weather: false });
   const providers = useMemo(
     () => createProviders({ maptilerKey: MAPTILER_KEY, onDegradedChange: setDegraded }),
@@ -521,6 +522,7 @@ export const App = () => {
         <TrackBuilder
           routing={providers.routing}
           elevation={providers.elevation}
+          geocoding={providers.geocoding}
           styleUrl={styleUrl}
           attribution={providers.tiles.attribution}
           onSave={saveTrack}

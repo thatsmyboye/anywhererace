@@ -85,6 +85,21 @@ export const makeSyntheticTrack = (options: SyntheticTrackOptions): Track => {
   };
 };
 
+/**
+ * Hand the event loop back for one turn.
+ *
+ * The sim is synchronous and CPU-bound, so a test that runs a dozen races in a
+ * loop holds the vitest worker's event loop for the whole run. The worker's RPC
+ * heartbeat to the main process cannot get through while it does, and past a
+ * few seconds vitest fails the run with `Timeout calling "onTaskUpdate"` — every
+ * test passing, one unhandled error, load-dependent enough to look flaky. Await
+ * this between races and the heartbeat gets its turn.
+ */
+export const yieldToEventLoop = (): Promise<void> =>
+  new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+
 export const manualWeather = (overrides: Partial<WeatherConditions> = {}): WeatherSpec => ({
   kind: 'manual',
   conditions: { ...DRY_STILL_CONDITIONS, ...overrides },

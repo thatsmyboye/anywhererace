@@ -3,8 +3,9 @@ import {
   createMockElevationProvider,
   createMockRoutingProvider,
   createMockWeatherProvider,
+  createNominatimProvider,
+  createOpenMeteoElevationProvider,
   createOpenMeteoProvider,
-  createOpenTopoDataProvider,
   createValhallaProvider,
   withElevationFallback,
   withRoutingFallback,
@@ -12,6 +13,7 @@ import {
 } from '@anywhererace/core';
 import type {
   ElevationProvider,
+  GeocodingProvider,
   RoutingProvider,
   TileProvider,
   WeatherProvider,
@@ -37,6 +39,12 @@ export type AppProviders = {
   routing: RoutingProvider;
   elevation: ElevationProvider;
   weather: WeatherProvider;
+  /**
+   * Place search. Alone among these it has no mock behind it: a synthetic
+   * gazetteer would send a user to somewhere that is not the place they named,
+   * which is a worse answer than "search is unavailable, pan there yourself".
+   */
+  geocoding: GeocodingProvider;
   tiles: TileProvider;
   /** Snapshot of what has fallen back so far. */
   degraded: () => DegradedState;
@@ -74,8 +82,12 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
     { onDegraded: onRoutingDegraded },
   );
 
+  // Open-Meteo rather than Open-Topo-Data, which is the better dataset but sends
+  // no CORS headers and so cannot be reached from a page at all. See
+  // `openmeteo-elevation.ts`: wiring the other one here meant every track saved
+  // from this app got synthetic hills and a banner explaining that it had.
   const elevation = withElevationFallback(
-    createOpenTopoDataProvider(),
+    createOpenMeteoElevationProvider(),
     createMockElevationProvider({ seed: 'fallback-dem' }),
     { onDegraded: onElevationDegraded },
   );
@@ -92,6 +104,7 @@ export const createProviders = (options: CreateProvidersOptions): AppProviders =
     routing,
     elevation,
     weather,
+    geocoding: createNominatimProvider(),
     tiles: createMapTilerProvider({ apiKey: options.maptilerKey }),
     degraded: () => ({ ...state }),
   };
