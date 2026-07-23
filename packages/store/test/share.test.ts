@@ -119,7 +119,8 @@ describe('shared race codec', () => {
 
   it('reports an incomplete race when a required field is missing', () => {
     const race = makeSharedRace();
-    const { config: _dropped, ...withoutConfig } = race;
+    const withoutConfig: Partial<SharedRace> = { ...race };
+    delete withoutConfig.config;
     const decoded = decodeSharedRace(encodeSharedRace(withoutConfig as SharedRace));
 
     expect(decoded.ok).toBe(false);
